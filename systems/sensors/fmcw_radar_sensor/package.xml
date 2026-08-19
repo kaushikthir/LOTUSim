@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>fmcw_radar_sensor</name>
+  <version>0.1.0</version>
+
+  <description>
+    LOTUSim CustomSensor adapter for the FMCW radar simulation model.
+  </description>
+
+  <maintainer email="kaushik@example.com">Kaushik</maintainer>
+
+  <license>EPL-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>lotusim_sensor_base</depend>
+
+  
+  <depend>sensor_msgs</depend>
+
+    <depend>std_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

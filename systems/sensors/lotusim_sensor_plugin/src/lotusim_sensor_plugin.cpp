@@ -315,7 +315,20 @@ bool LotusimSensorPlugin::EachNew(
                 _entity,
                 model_name,
                 sensor_name);
-        } else {
+        } else if (type == "fmcw_radar") {
+            m_logger->info(
+                "LotusimSensorPlugin::FMCWRadar: Creating sensor [{}/{}]",
+                model_name,
+                sensor_name);
+
+            sensor = CreateSensor<FmcwRadarSensor>(
+                data,
+                model_entity,
+                _entity,
+                model_name,
+                sensor_name);
+
+        }else {
             return true;
         }
         auto child_link = m_ecm->ChildrenByComponents(

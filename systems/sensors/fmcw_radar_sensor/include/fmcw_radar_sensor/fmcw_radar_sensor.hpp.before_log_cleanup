@@ -1,0 +1,135 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include <gz/math/Vector3.hh>
+#include <gz/sim/Entity.hh>
+
+#include <sensor_msgs/msg/image.hpp>
+
+#include "fmcw_radar/IFmcwRadarScene.hpp"
+#include "fmcw_radar/fmcw_radar.hpp"
+#include "lotusim_sensor_base/custom_sensor.hpp"
+
+namespace lotusim::sensor {
+
+class FmcwRadarSensor final
+    : public CustomSensor,
+      public fmcw_radar::IFmcwRadarScene
+{
+public:
+    FmcwRadarSensor(
+        std::shared_ptr<spdlog::logger> logger,
+        rclcpp::Node::SharedPtr node,
+        const gz::sim::Entity& vessel_entity,
+        const gz::sim::Entity& sensor_entity,
+        const std::string& parent_name,
+        const std::string& sensor_name);
+
+    ~FmcwRadarSensor() override = default;
+
+    bool CustomSensorLoad(
+        const sdf::Sensor& sdf) override;
+
+    bool UpdateSensor(
+        const gz::sim::UpdateInfo& info,
+        const gz::sim::EntityComponentManager& ecm) override;
+
+    bool traceNearest(
+        const fmcw_radar::Ray& ray,
+        fmcw_radar::SurfaceHit& hit) const override;
+
+    std::vector<fmcw_radar::RayTraceResult> traceNearestBatch(
+        const std::vector<fmcw_radar::Ray>& rays) const override;
+
+private:
+    struct CachedTriangle
+    {
+        gz::math::Vector3d a;
+        gz::math::Vector3d b;
+        gz::math::Vector3d c;
+
+        gz::math::Vector3d normal;
+        gz::math::Vector3d boundsMin;
+        gz::math::Vector3d boundsMax;
+        gz::math::Vector3d centroid;
+
+        std::int32_t objectId{-1};
+    };
+
+    struct BvhNode
+    {
+        gz::math::Vector3d boundsMin;
+        gz::math::Vector3d boundsMax;
+
+        int left{-1};
+        int right{-1};
+
+        std::size_t start{0};
+        std::size_t count{0};
+
+        bool IsLeaf() const {
+            return left < 0 && right < 0;
+        }
+    };
+
+    void RebuildGeometryCache(
+        const gz::sim::EntityComponentManager& ecm);
+
+    int BuildBvhNode(
+        std::size_t start,
+        std::size_t count);
+
+    bool TraceOne(
+        const fmcw_radar::Ray& ray,
+        fmcw_radar::SurfaceHit& hit) const;
+
+    static bool RayIntersectsAabb(
+        const gz::math::Vector3d& origin,
+        const gz::math::Vector3d& direction,
+        const gz::math::Vector3d& boundsMin,
+        const gz::math::Vector3d& boundsMax,
+        double maximumDistance);
+
+    static bool RayIntersectsTriangle(
+        const gz::math::Vector3d& origin,
+        const gz::math::Vector3d& direction,
+        const CachedTriangle& triangle,
+        double& distance);
+
+    sensor_msgs::msg::Image BuildPpiImage(
+        const fmcw_radar::RadarFrame& frame) const;
+
+    void PublishPpi(
+        const fmcw_radar::RadarFrame& frame);
+
+    rclcpp::Node::SharedPtr m_node;
+
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr
+        m_ppi_publisher;
+
+    std::unique_ptr<fmcw_radar::FmcwRadar> m_radar_model;
+
+    gz::sim::Entity m_vessel_entity_id;
+    gz::sim::Entity m_sensor_entity_id;
+
+    std::vector<CachedTriangle> m_triangles;
+    std::vector<BvhNode> m_bvh_nodes;
+    int m_bvh_root{-1};
+
+    double m_max_range_m{1000.0};
+
+    std::size_t m_ppi_image_size_px{800};
+    double m_ppi_dynamic_range_db{60.0};
+
+    mutable std::size_t m_hits_this_scan{0};
+    std::size_t m_scan_number{0};
+
+    bool m_warned_empty_scene{false};
+};
+
+}  // namespace lotusim::sensor

@@ -91,6 +91,7 @@ find_package(lotusim_common REQUIRED)
 add_library(lotusim_sensor_base
 SHARED
 src/custom_sensor.cpp
+src/exteroceptive_sensor.cpp
 )
 target_include_directories(lotusim_sensor_base
   PUBLIC

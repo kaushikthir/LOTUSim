@@ -10,11 +10,52 @@
           </mesh>
         </geometry>
       </collision>
+
       <sensor name="ais_sensor" type="custom" gz:type="ais">
         <update_rate>1</update_rate>
         <noise_sigma>0.01</noise_sigma>
         <noise_amplitude>0.01</noise_amplitude>
       </sensor>
+
+      <sensor name="mas10_fmcw_radar"
+              type="custom"
+              gz:type="fmcw_radar">
+
+        <update_rate>2</update_rate>
+
+
+        <exteroceptive>
+          <scope_radius_m>15000.0</scope_radius_m>
+        </exteroceptive>
+
+        <fmcw>
+          <carrier_frequency_hz>77000000000</carrier_frequency_hz>
+
+          <max_range_m>1000.0</max_range_m>
+          <range_bin_size_m>0.155</range_bin_size_m>
+          <azimuth_count>400</azimuth_count>
+
+          <antenna_model>sinc</antenna_model>
+          <horizontal_beamwidth_deg>1.8</horizontal_beamwidth_deg>
+          <vertical_beamwidth_deg>16.0</vertical_beamwidth_deg>
+          <boresight_gain_linear>100.0</boresight_gain_linear>
+
+          <transmit_power_w>1.0</transmit_power_w>
+
+          <scattering_model>constant_rcs</scattering_model>
+          <constant_rcs_m2>10.0</constant_rcs_m2>
+
+          <horizontal_samples>61</horizontal_samples>
+          <vertical_samples>9</vertical_samples>
+          <horizontal_sample_span_deg>6.0</horizontal_sample_span_deg>
+          <vertical_sample_span_deg>8.0</vertical_sample_span_deg>
+
+          <noise_model>none</noise_model>
+          <noise_seed>0</noise_seed>
+        </fmcw>
+
+      </sensor>
+
     </link>
   </model>
 </sdf>

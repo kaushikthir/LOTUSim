@@ -1,0 +1,5 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/fmcw_radarTargets.cmake")
+
+check_required_components(fmcw_radar)

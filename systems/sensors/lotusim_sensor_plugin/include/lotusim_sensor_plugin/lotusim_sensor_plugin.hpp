@@ -43,6 +43,7 @@
 #include "lotusim_sensor_base/custom_sensor.hpp"
 #include "lotusim_sensor_msgs/msg/collisions.hpp"
 #include "radar_sensor/radar_sensor.hpp"
+#include "fmcw_radar_sensor/fmcw_radar_sensor.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
 #include "subsea_pressure_sensor/subsea_pressure_sensor.hh"

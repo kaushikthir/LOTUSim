@@ -33,11 +33,7 @@
         </plugin>
 
         <!-- The rendering application interface, default to ROS2 connection -->
-        <!-- 
-        <plugin filename="gz-sim-scene-broadcaster-system"
-                name="gz::sim::systems::SceneBroadcaster" />
-
-        <plugin filename="render_plugin" name="lotusim::gazebo::RenderPlugin">
+        <!-- <plugin filename="render_plugin" name="lotusim::gazebo::RenderPlugin">
             <connection_protocol>TCPUDP</connection_protocol>
             <ip>127.0.0.1</ip>
             <udp_port>23457</udp_port>
