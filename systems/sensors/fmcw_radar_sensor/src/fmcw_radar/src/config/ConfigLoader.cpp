@@ -40,6 +40,54 @@ FmcwRadarConfig loadRadarConfig(const std::string& filename) {
     config.rotationRateHz = sensor.at("rotation_rate_hz").get<double>();
 
     // ========================================================
+    // FMCW WAVEFORM AND RANGE PROCESSING
+    // ========================================================
+
+    if (j.contains("waveform")) {
+        const auto& waveform = j.at("waveform");
+
+        config.waveform.model =
+            waveform.value(
+                "model",
+                config.waveform.model);
+
+        config.waveform.bandwidthHz =
+            waveform.value(
+                "bandwidth_hz",
+                config.waveform.bandwidthHz);
+
+        config.waveform.chirpDurationS =
+            waveform.value(
+                "chirp_duration_s",
+                config.waveform.chirpDurationS);
+
+        config.waveform.adcSampleCount =
+            waveform.value(
+                "adc_sample_count",
+                config.waveform.adcSampleCount);
+
+        config.waveform.fftSize =
+            waveform.value(
+                "fft_size",
+                config.waveform.fftSize);
+
+        config.waveform.window =
+            waveform.value(
+                "window",
+                config.waveform.window);
+
+        config.waveform.responseFloorDb =
+            waveform.value(
+                "response_floor_db",
+                config.waveform.responseFloorDb);
+
+        config.waveform.maximumResponseHalfWidthBins =
+            waveform.value(
+                "maximum_response_half_width_bins",
+                config.waveform.maximumResponseHalfWidthBins);
+    }
+
+    // ========================================================
     // ANTENNA
     // ========================================================
 

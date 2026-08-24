@@ -23,7 +23,7 @@
 
 #include <sdf/Element.hh>
 
-#include <sensor_msgs/image_encodings.hpp>
+
 #include <std_msgs/msg/float32_multi_array.hpp>
 
 #include "fmcw_radar/FmcwRadarConfig.hpp"
@@ -239,7 +239,6 @@ FmcwRadarSensor::FmcwRadarSensor(
           parent_name,
           sensor_name),
       m_node(node),
-      m_ppi_topic(BuildRadarTopic(parent_name, sensor_name, "ppi")),
       m_returns_topic(BuildRadarTopic(parent_name, sensor_name, "returns")),
       m_vessel_entity_id(vessel_entity),
       m_sensor_entity_id(sensor_entity)
@@ -413,11 +412,6 @@ bool FmcwRadarSensor::CustomSensorLoad(
                 "ROS 2 node is unavailable for the PPI publisher");
         }
 
-        m_ppi_publisher =
-            m_node->create_publisher<sensor_msgs::msg::Image>(
-                m_ppi_topic,
-                rclcpp::SensorDataQoS());
-
 
         m_returns_publisher =
             m_node->create_publisher<std_msgs::msg::Float32MultiArray>(
@@ -428,13 +422,8 @@ bool FmcwRadarSensor::CustomSensorLoad(
             "FmcwRadarSensor [{}]: publishing radar topics: "
             "PPI=[{}], returns=[{}]",
             m_sensor_name,
-            m_ppi_topic,
             m_returns_topic);
 
-        m_logger->info(
-            "FmcwRadarSensor [{}]: publishing PPI images on "
-            "[/fmcw_radar/ppi]",
-            m_sensor_name);
 
         return true;
     } catch (const std::exception& exception) {
@@ -1239,163 +1228,6 @@ FmcwRadarSensor::traceNearestBatch(
 }
 
 
-sensor_msgs::msg::Image FmcwRadarSensor::BuildPpiImage(
-    const fmcw_radar::RadarFrame& frame) const
-{
-    sensor_msgs::msg::Image image;
-
-    const std::size_t image_size =
-        std::max<std::size_t>(
-            64,
-            m_ppi_image_size_px);
-
-    image.header.frame_id = m_sensor_name;
-
-    if (m_node) {
-        image.header.stamp = m_node->now();
-    }
-
-    image.height =
-        static_cast<std::uint32_t>(image_size);
-
-    image.width =
-        static_cast<std::uint32_t>(image_size);
-
-    image.encoding =
-        sensor_msgs::image_encodings::MONO8;
-
-    image.is_bigendian = false;
-
-    image.step =
-        static_cast<sensor_msgs::msg::Image::_step_type>(
-            image_size);
-
-    image.data.assign(
-        image_size * image_size,
-        std::uint8_t{0});
-
-    if (!m_radar_model ||
-        frame.profiles.empty())
-    {
-        return image;
-    }
-
-    const auto& config =
-        m_radar_model->config();
-
-    /*
-     * Temporary zoomed display for nearby test objects.
-     */
-    const double ppi_display_range_m =
-        std::min(
-            100.0,
-            config.maxRangeM);
-
-    const double centre =
-        0.5 *
-        static_cast<double>(
-            image_size - 1);
-
-    const double display_radius =
-        0.48 *
-        static_cast<double>(
-            image_size);
-
-    /*
-     * For every azimuth, find only the strongest detected bin
-     * and draw one visible dot.
-     */
-    for (const auto& profile : frame.profiles) {
-        double strongest_power = 0.0;
-        std::size_t strongest_bin = 0;
-        bool detection_found = false;
-
-        for (std::size_t bin_index = 0;
-             bin_index < profile.bins.size();
-             ++bin_index)
-        {
-            const double power =
-                profile.bins[bin_index];
-
-            if (power > strongest_power &&
-                std::isfinite(power))
-            {
-                strongest_power = power;
-                strongest_bin = bin_index;
-                detection_found = true;
-            }
-        }
-
-        if (!detection_found ||
-            strongest_power <= 0.0)
-        {
-            continue;
-        }
-
-        const double range_m =
-            (static_cast<double>(strongest_bin) + 0.5) *
-            config.rangeBinSizeM;
-
-        if (range_m > ppi_display_range_m) {
-            continue;
-        }
-
-        const double radius_px =
-            (range_m / ppi_display_range_m) *
-            display_radius;
-
-        const int x =
-            static_cast<int>(
-                std::lround(
-                    centre +
-                    radius_px *
-                    std::sin(profile.azimuthRad)));
-
-        const int y =
-            static_cast<int>(
-                std::lround(
-                    centre -
-                    radius_px *
-                    std::cos(profile.azimuthRad)));
-
-        /*
-         * Draw a 5 x 5 bright square so nearby detections
-         * remain visible.
-         */
-        constexpr int dot_radius = 2;
-
-        for (int dy = -dot_radius;
-             dy <= dot_radius;
-             ++dy)
-        {
-            for (int dx = -dot_radius;
-                 dx <= dot_radius;
-                 ++dx)
-            {
-                const int pixel_x = x + dx;
-                const int pixel_y = y + dy;
-
-                if (pixel_x < 0 ||
-                    pixel_y < 0 ||
-                    pixel_x >= static_cast<int>(image_size) ||
-                    pixel_y >= static_cast<int>(image_size))
-                {
-                    continue;
-                }
-
-                const std::size_t pixel_index =
-                    static_cast<std::size_t>(pixel_y) *
-                        image_size +
-                    static_cast<std::size_t>(pixel_x);
-
-                image.data[pixel_index] = 255;
-            }
-        }
-    }
-
-    return image;
-}
-
 void FmcwRadarSensor::PublishReturns(
     const fmcw_radar::RadarFrame& frame)
 {
@@ -1475,15 +1307,6 @@ void FmcwRadarSensor::PublishReturns(
     m_returns_publisher->publish(message);
 }
 
-void FmcwRadarSensor::PublishPpi(
-    const fmcw_radar::RadarFrame& frame)
-{
-    if (!m_ppi_publisher) {
-        return;
-    }
-
-    m_ppi_publisher->publish(BuildPpiImage(frame));
-}
 
 bool FmcwRadarSensor::UpdateSensor(
     const gz::sim::UpdateInfo& info,
@@ -1537,12 +1360,11 @@ bool FmcwRadarSensor::UpdateSensor(
 
     const fmcw_radar::RadarFrame frame =
         m_radar_model->scan(
-            *this,
+            *this,          // its an FmcwRadarSensor object but acts as a scene
             radar_pose,
             timestamp_seconds,
             nullptr);
 
-    PublishPpi(frame);
     PublishReturns(frame);
 
     ++m_scan_number;

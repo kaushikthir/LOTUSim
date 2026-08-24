@@ -25,7 +25,7 @@
 
 
         <exteroceptive>
-          <scope_radius_m>15000.0</scope_radius_m>
+          <scope_radius_m>1500.0</scope_radius_m>
         </exteroceptive>
 
         <fmcw>

@@ -11,6 +11,7 @@
 #include <fmcw_radar/response/RadarReturnModel.hpp>
 #include <fmcw_radar/scan/BeamGeometry.hpp>
 #include <fmcw_radar/scan/ScanController.hpp>
+#include <fmcw_radar/signal/FmcwRangeProcessor.hpp>
 
 namespace fmcw_radar {
 
@@ -55,6 +56,7 @@ RadarFrame FmcwRadar::scan(
         *propagation_,
         *scattering_);
     RangeBinner rangeBinner(config_);
+    FmcwRangeProcessor rangeProcessor(config_);
 
     RadarFrame frame;
     frame.startTimestampSeconds = timestampSeconds;
@@ -139,6 +141,9 @@ RadarFrame FmcwRadar::scan(
         AzimuthProfile& profile = profiles[azimuthIndex];
         const ScanStep& step = steps[azimuthIndex];
 
+        std::vector<RangeContribution> rangeContributions;
+        rangeContributions.reserve(beamSamples.size());
+
         for (const BeamSample& sample : beamSamples) {
             const Ray& ray = rays[rayIndex];
             const double antennaGain =
@@ -156,11 +161,11 @@ RadarFrame FmcwRadar::scan(
                         traceResult.surfaceHit,
                         antennaGain);
 
-                rangeBinner.add(
-                    profile,
+                rangeContributions.push_back({
                     traceResult.surfaceHit.distanceM,
                     receivedPower,
-                    sample.weight);
+                    sample.weight
+                });
             }
 
             debug::recordRay(
@@ -176,6 +181,10 @@ RadarFrame FmcwRadar::scan(
 
             ++rayIndex;
         }
+
+        rangeProcessor.process(
+            profile,
+            rangeContributions);
 
         noise_->apply(
             profile,

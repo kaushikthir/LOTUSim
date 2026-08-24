@@ -48,6 +48,8 @@ add_library(
 
     src/output/RangeBinner.cpp
 
+    src/signal/FmcwRangeProcessor.cpp
+
     src/debug/DebugRecorder.cpp
 
     src/antenna/SincAntennaPattern.cpp

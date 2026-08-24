@@ -9,7 +9,6 @@
 #include <gz/math/Vector3.hh>
 #include <gz/sim/Entity.hh>
 
-#include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
 
 #include "fmcw_radar/IFmcwRadarScene.hpp"
@@ -102,25 +101,13 @@ private:
         const CachedTriangle& triangle,
         double& distance);
 
-    sensor_msgs::msg::Image BuildPpiImage(
-        const fmcw_radar::RadarFrame& frame) const;
-
-    void PublishPpi(
-        const fmcw_radar::RadarFrame& frame);
-
     void PublishReturns(
         const fmcw_radar::RadarFrame& frame);
 
     rclcpp::Node::SharedPtr m_node;
 
-    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr
-        m_ppi_publisher;
-
     rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr
         m_returns_publisher;
-
-
-    std::string m_ppi_topic;
 
     std::string m_returns_topic;
 
@@ -135,7 +122,6 @@ private:
 
     double m_max_range_m{1000.0};
 
-    std::size_t m_ppi_image_size_px{800};
     double m_ppi_dynamic_range_db{60.0};
 
     std::size_t m_collision_count{0};
