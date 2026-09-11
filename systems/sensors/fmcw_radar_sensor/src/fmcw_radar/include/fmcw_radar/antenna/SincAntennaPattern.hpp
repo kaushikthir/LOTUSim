@@ -5,14 +5,15 @@
 namespace fmcw_radar {
 
 class SincAntennaPattern final : public IAntennaPattern {
-  public:
+public:
     SincAntennaPattern(double horizontalHpbwRad, double verticalHpbwRad);
 
-    double powerGain(double azimuthOffsetRad, double elevationOffsetRad) const override;
+    double powerGain(double azimuthOffsetRad, double elevationOffsetRad)
+        const override;
 
-  private:
+private:
     double horizontalHpbwRad_;
     double verticalHpbwRad_;
 };
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

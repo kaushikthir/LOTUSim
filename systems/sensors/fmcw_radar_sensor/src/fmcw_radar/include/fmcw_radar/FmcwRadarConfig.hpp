@@ -33,7 +33,6 @@ struct NoiseConfig {
     std::unordered_map<std::string, double> parameters;
 };
 
-
 struct WaveformConfig {
     /*
      * Linear FMCW waveform and range-processing configuration.
@@ -129,4 +128,4 @@ struct FmcwRadarConfig {
     NoiseConfig noise;
 };
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

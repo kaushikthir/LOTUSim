@@ -1,14 +1,13 @@
-#include <fmcw_radar/config/ConfigLoader.hpp>
-
 #include <cstdint>
+#include <fmcw_radar/config/ConfigLoader.hpp>
 #include <fstream>
-#include <stdexcept>
-
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 
 namespace fmcw_radar {
 
-FmcwRadarConfig loadRadarConfig(const std::string& filename) {
+FmcwRadarConfig loadRadarConfig(const std::string& filename)
+{
     std::ifstream input(filename);
 
     if (!input) {
@@ -46,45 +45,30 @@ FmcwRadarConfig loadRadarConfig(const std::string& filename) {
     if (j.contains("waveform")) {
         const auto& waveform = j.at("waveform");
 
-        config.waveform.model =
-            waveform.value(
-                "model",
-                config.waveform.model);
+        config.waveform.model = waveform.value("model", config.waveform.model);
 
         config.waveform.bandwidthHz =
-            waveform.value(
-                "bandwidth_hz",
-                config.waveform.bandwidthHz);
+            waveform.value("bandwidth_hz", config.waveform.bandwidthHz);
 
         config.waveform.chirpDurationS =
-            waveform.value(
-                "chirp_duration_s",
-                config.waveform.chirpDurationS);
+            waveform.value("chirp_duration_s", config.waveform.chirpDurationS);
 
         config.waveform.adcSampleCount =
-            waveform.value(
-                "adc_sample_count",
-                config.waveform.adcSampleCount);
+            waveform.value("adc_sample_count", config.waveform.adcSampleCount);
 
         config.waveform.fftSize =
-            waveform.value(
-                "fft_size",
-                config.waveform.fftSize);
+            waveform.value("fft_size", config.waveform.fftSize);
 
         config.waveform.window =
-            waveform.value(
-                "window",
-                config.waveform.window);
+            waveform.value("window", config.waveform.window);
 
-        config.waveform.responseFloorDb =
-            waveform.value(
-                "response_floor_db",
-                config.waveform.responseFloorDb);
+        config.waveform.responseFloorDb = waveform.value(
+            "response_floor_db",
+            config.waveform.responseFloorDb);
 
-        config.waveform.maximumResponseHalfWidthBins =
-            waveform.value(
-                "maximum_response_half_width_bins",
-                config.waveform.maximumResponseHalfWidthBins);
+        config.waveform.maximumResponseHalfWidthBins = waveform.value(
+            "maximum_response_half_width_bins",
+            config.waveform.maximumResponseHalfWidthBins);
     }
 
     // ========================================================
@@ -95,9 +79,11 @@ FmcwRadarConfig loadRadarConfig(const std::string& filename) {
 
     config.antennaModel = antenna.at("model").get<std::string>();
 
-    config.horizontalBeamwidthDeg = antenna.at("horizontal_beamwidth_deg").get<double>();
+    config.horizontalBeamwidthDeg =
+        antenna.at("horizontal_beamwidth_deg").get<double>();
 
-    config.verticalBeamwidthDeg = antenna.at("vertical_beamwidth_deg").get<double>();
+    config.verticalBeamwidthDeg =
+        antenna.at("vertical_beamwidth_deg").get<double>();
 
     // ========================================================
     // SIMULATION ASSUMPTIONS
@@ -107,9 +93,11 @@ FmcwRadarConfig loadRadarConfig(const std::string& filename) {
 
     config.transmitPowerW = assumptions.at("transmit_power_w").get<double>();
 
-    config.boresightGainLinear = assumptions.at("boresight_gain_linear").get<double>();
+    config.boresightGainLinear =
+        assumptions.at("boresight_gain_linear").get<double>();
 
-    config.scatteringModel = assumptions.at("scattering_model").get<std::string>();
+    config.scatteringModel =
+        assumptions.at("scattering_model").get<std::string>();
 
     config.constantRcsM2 = assumptions.at("constant_rcs_m2").get<double>();
 
@@ -119,13 +107,16 @@ FmcwRadarConfig loadRadarConfig(const std::string& filename) {
 
     const auto& sampling = j.at("numerical_sampling");
 
-    config.horizontalSamples = sampling.at("horizontal_samples").get<std::size_t>();
+    config.horizontalSamples =
+        sampling.at("horizontal_samples").get<std::size_t>();
 
     config.verticalSamples = sampling.at("vertical_samples").get<std::size_t>();
 
-    config.horizontalSampleSpanDeg = sampling.at("horizontal_half_span_deg").get<double>();
+    config.horizontalSampleSpanDeg =
+        sampling.at("horizontal_half_span_deg").get<double>();
 
-    config.verticalSampleSpanDeg = sampling.at("vertical_half_span_deg").get<double>();
+    config.verticalSampleSpanDeg =
+        sampling.at("vertical_half_span_deg").get<double>();
 
     // ========================================================
     // NOISE
@@ -140,7 +131,8 @@ FmcwRadarConfig loadRadarConfig(const std::string& filename) {
 
         if (noise.contains("parameters")) {
             for (const auto& item : noise.at("parameters").items()) {
-                config.noise.parameters[item.key()] = item.value().get<double>();
+                config.noise.parameters[item.key()] =
+                    item.value().get<double>();
             }
         }
     }
@@ -148,4 +140,4 @@ FmcwRadarConfig loadRadarConfig(const std::string& filename) {
     return config;
 }
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

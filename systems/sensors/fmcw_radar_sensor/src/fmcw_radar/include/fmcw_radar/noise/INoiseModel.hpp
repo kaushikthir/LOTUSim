@@ -17,10 +17,11 @@ struct NoiseContext {
 };
 
 class INoiseModel {
-  public:
+public:
     virtual ~INoiseModel() = default;
 
-    virtual void apply(AzimuthProfile& profile, const NoiseContext& context) const = 0;
+    virtual void apply(AzimuthProfile& profile, const NoiseContext& context)
+        const = 0;
 };
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

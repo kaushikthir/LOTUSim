@@ -17,15 +17,18 @@ struct ScanStep {
 };
 
 class ScanController {
-  public:
+public:
     explicit ScanController(const FmcwRadarConfig& config);
 
-    ScanStep step(std::size_t azimuthIndex, const RadarPose& pose, double scanStartTime) const;
+    ScanStep step(
+        std::size_t azimuthIndex,
+        const RadarPose& pose,
+        double scanStartTime) const;
 
     NoiseContext noiseContext(const ScanStep& step) const;
 
-  private:
+private:
     const FmcwRadarConfig& config_;
 };
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

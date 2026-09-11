@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <string>
 
 namespace fmcw_radar {
 
@@ -11,19 +12,23 @@ struct Vec3 {
     double y{0.0};
     double z{0.0};
 
-    Vec3 operator+(const Vec3& other) const {
+    Vec3 operator+(const Vec3& other) const
+    {
         return {x + other.x, y + other.y, z + other.z};
     }
 
-    Vec3 operator-(const Vec3& other) const {
+    Vec3 operator-(const Vec3& other) const
+    {
         return {x - other.x, y - other.y, z - other.z};
     }
 
-    Vec3 operator*(double scalar) const {
+    Vec3 operator*(double scalar) const
+    {
         return {x * scalar, y * scalar, z * scalar};
     }
 
-    Vec3 operator-() const {
+    Vec3 operator-() const
+    {
         return {-x, -y, -z};
     }
 };
@@ -40,10 +45,18 @@ struct SurfaceHit {
     Vec3 position;
     Vec3 normal;
 
-    std::int32_t objectId{-1};
-    std::int32_t materialId{-1};
-};
+    std::int64_t objectId{-1};
+    std::string objectName;
 
+    std::int64_t modelId{-1};
+    std::string modelName;
+
+    std::int64_t collisionId{-1};
+    std::string collisionName;
+
+    std::int32_t materialId{-1};
+    std::string materialName;
+};
 /*
  * Result for one ray in a batched scene query.
  */
@@ -113,4 +126,4 @@ struct ScanDebug {
     std::vector<std::vector<RaySample>> raysByAzimuth;
 };
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

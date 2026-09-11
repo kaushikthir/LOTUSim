@@ -2,14 +2,12 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
-#include <string>
-#include <vector>
-
 #include <gz/math/Vector3.hh>
 #include <gz/sim/Entity.hh>
-
+#include <memory>
 #include <std_msgs/msg/float32_multi_array.hpp>
+#include <string>
+#include <vector>
 
 #include "fmcw_radar/IFmcwRadarScene.hpp"
 #include "fmcw_radar/fmcw_radar.hpp"
@@ -17,10 +15,8 @@
 
 namespace lotusim::sensor {
 
-class FmcwRadarSensor final
-    : public ExteroceptiveSensor,
-      public fmcw_radar::IFmcwRadarScene
-{
+class FmcwRadarSensor final : public ExteroceptiveSensor,
+                              public fmcw_radar::IFmcwRadarScene {
 public:
     FmcwRadarSensor(
         std::shared_ptr<spdlog::logger> logger,
@@ -32,23 +28,20 @@ public:
 
     ~FmcwRadarSensor() override = default;
 
-    bool CustomSensorLoad(
-        const sdf::Sensor& sdf) override;
+    bool CustomSensorLoad(const sdf::Sensor& sdf) override;
 
     bool UpdateSensor(
         const gz::sim::UpdateInfo& info,
         const gz::sim::EntityComponentManager& ecm) override;
 
-    bool traceNearest(
-        const fmcw_radar::Ray& ray,
-        fmcw_radar::SurfaceHit& hit) const override;
+    bool traceNearest(const fmcw_radar::Ray& ray, fmcw_radar::SurfaceHit& hit)
+        const override;
 
     std::vector<fmcw_radar::RayTraceResult> traceNearestBatch(
         const std::vector<fmcw_radar::Ray>& rays) const override;
 
 private:
-    struct CachedTriangle
-    {
+    struct CachedTriangle {
         gz::math::Vector3d a;
         gz::math::Vector3d b;
         gz::math::Vector3d c;
@@ -58,11 +51,20 @@ private:
         gz::math::Vector3d boundsMax;
         gz::math::Vector3d centroid;
 
-        std::int32_t objectId{-1};
+        std::int64_t objectId{-1};
+        std::string objectName;
+
+        std::int64_t modelId{-1};
+        std::string modelName;
+
+        std::int64_t collisionId{-1};
+        std::string collisionName;
+
+        std::int32_t materialId{-1};
+        std::string materialName;
     };
 
-    struct BvhNode
-    {
+    struct BvhNode {
         gz::math::Vector3d boundsMin;
         gz::math::Vector3d boundsMax;
 
@@ -72,21 +74,18 @@ private:
         std::size_t start{0};
         std::size_t count{0};
 
-        bool IsLeaf() const {
+        bool IsLeaf() const
+        {
             return left < 0 && right < 0;
         }
     };
 
-    void RebuildGeometryCache(
-        const gz::sim::EntityComponentManager& ecm);
+    void RebuildGeometryCache(const gz::sim::EntityComponentManager& ecm);
 
-    int BuildBvhNode(
-        std::size_t start,
-        std::size_t count);
+    int BuildBvhNode(std::size_t start, std::size_t count);
 
-    bool TraceOne(
-        const fmcw_radar::Ray& ray,
-        fmcw_radar::SurfaceHit& hit) const;
+    bool TraceOne(const fmcw_radar::Ray& ray, fmcw_radar::SurfaceHit& hit)
+        const;
 
     static bool RayIntersectsAabb(
         const gz::math::Vector3d& origin,
@@ -101,8 +100,7 @@ private:
         const CachedTriangle& triangle,
         double& distance);
 
-    void PublishReturns(
-        const fmcw_radar::RadarFrame& frame);
+    void PublishReturns(const fmcw_radar::RadarFrame& frame);
 
     rclcpp::Node::SharedPtr m_node;
 

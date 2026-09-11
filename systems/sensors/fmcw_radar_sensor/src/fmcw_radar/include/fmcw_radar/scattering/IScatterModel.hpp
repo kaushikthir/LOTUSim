@@ -5,10 +5,14 @@
 namespace fmcw_radar {
 
 class IScatterModel {
-  public:
+public:
     virtual ~IScatterModel() = default;
 
-    virtual double radarCrossSectionM2(const SurfaceHit& hit, const Vec3& incidentDirection, const Vec3& returnDirection, double frequencyHz) const = 0;
+    virtual double radarCrossSectionM2(
+        const SurfaceHit& hit,
+        const Vec3& incidentDirection,
+        const Vec3& returnDirection,
+        double frequencyHz) const = 0;
 };
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

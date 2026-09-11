@@ -1,9 +1,5 @@
 #include "fmcw_radar/fmcw_radar.hpp"
 
-#include <stdexcept>
-#include <utility>
-#include <vector>
-
 #include <fmcw_radar/config/ConfigLoader.hpp>
 #include <fmcw_radar/debug/DebugRecorder.hpp>
 #include <fmcw_radar/factory/ModelFactory.hpp>
@@ -12,6 +8,9 @@
 #include <fmcw_radar/scan/BeamGeometry.hpp>
 #include <fmcw_radar/scan/ScanController.hpp>
 #include <fmcw_radar/signal/FmcwRangeProcessor.hpp>
+#include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace fmcw_radar {
 
@@ -20,11 +19,12 @@ namespace fmcw_radar {
 // ============================================================
 
 FmcwRadar::FmcwRadar(const std::string& configFile)
-    : FmcwRadar(loadRadarConfig(configFile)) {
+    : FmcwRadar(loadRadarConfig(configFile))
+{
 }
 
-FmcwRadar::FmcwRadar(const FmcwRadarConfig& config)
-    : config_(config) {
+FmcwRadar::FmcwRadar(const FmcwRadarConfig& config) : config_(config)
+{
     antenna_ = makeAntennaPattern(config_);
     propagation_ = makePropagationModel(config_);
     scattering_ = makeScatterModel(config_);
@@ -38,7 +38,6 @@ FmcwRadar::FmcwRadar(FmcwRadar&&) noexcept = default;
 
 FmcwRadar& FmcwRadar::operator=(FmcwRadar&&) noexcept = default;
 
-
 // ============================================================
 // RADAR BRAIN
 // ============================================================
@@ -47,14 +46,11 @@ RadarFrame FmcwRadar::scan(
     const IFmcwRadarScene& scene,
     const RadarPose& pose,
     double timestampSeconds,
-    ScanDebug* debug) const {
-
+    ScanDebug* debug) const
+{
     ScanController scanController(config_);
     BeamGeometry beamGeometry(config_);
-    RadarReturnModel returnModel(
-        config_,
-        *propagation_,
-        *scattering_);
+    RadarReturnModel returnModel(config_, *propagation_, *scattering_);
     RangeBinner rangeBinner(config_);
     FmcwRangeProcessor rangeProcessor(config_);
 
@@ -67,11 +63,9 @@ RadarFrame FmcwRadar::scan(
         debug->raysByAzimuth.resize(config_.azimuthCount);
     }
 
-    const std::vector<BeamSample>& beamSamples =
-        sampler_->samples();
+    const std::vector<BeamSample>& beamSamples = sampler_->samples();
 
-    const std::size_t totalRayCount =
-        config_.azimuthCount * beamSamples.size();
+    const std::size_t totalRayCount = config_.azimuthCount * beamSamples.size();
 
     /*
      * First generate the whole radar scan.
@@ -89,34 +83,22 @@ RadarFrame FmcwRadar::scan(
     rays.reserve(totalRayCount);
     antennaGains.reserve(totalRayCount);
 
-    for (std::size_t azimuthIndex = 0;
-         azimuthIndex < config_.azimuthCount;
+    for (std::size_t azimuthIndex = 0; azimuthIndex < config_.azimuthCount;
          ++azimuthIndex) {
-
         const ScanStep step =
-            scanController.step(
-                azimuthIndex,
-                pose,
-                timestampSeconds);
+            scanController.step(azimuthIndex, pose, timestampSeconds);
 
         steps.push_back(step);
 
         profiles.push_back(
-            rangeBinner.makeProfile(
-                step.azimuthRad,
-                step.timestampSeconds));
+            rangeBinner.makeProfile(step.azimuthRad, step.timestampSeconds));
 
         for (const BeamSample& sample : beamSamples) {
-            antennaGains.push_back(
-                antenna_->powerGain(
-                    sample.azimuthOffsetRad,
-                    sample.elevationOffsetRad));
+            antennaGains.push_back(antenna_->powerGain(
+                sample.azimuthOffsetRad,
+                sample.elevationOffsetRad));
 
-            rays.push_back(
-                beamGeometry.makeRay(
-                    pose,
-                    step.azimuthRad,
-                    sample));
+            rays.push_back(beamGeometry.makeRay(pose, step.azimuthRad, sample));
         }
     }
 
@@ -134,10 +116,8 @@ RadarFrame FmcwRadar::scan(
      */
     std::size_t rayIndex = 0;
 
-    for (std::size_t azimuthIndex = 0;
-         azimuthIndex < config_.azimuthCount;
+    for (std::size_t azimuthIndex = 0; azimuthIndex < config_.azimuthCount;
          ++azimuthIndex) {
-
         AzimuthProfile& profile = profiles[azimuthIndex];
         const ScanStep& step = steps[azimuthIndex];
 
@@ -146,26 +126,22 @@ RadarFrame FmcwRadar::scan(
 
         for (const BeamSample& sample : beamSamples) {
             const Ray& ray = rays[rayIndex];
-            const double antennaGain =
-                antennaGains[rayIndex];
+            const double antennaGain = antennaGains[rayIndex];
 
-            const RayTraceResult& traceResult =
-                traceResults[rayIndex];
+            const RayTraceResult& traceResult = traceResults[rayIndex];
 
             double receivedPower = 0.0;
 
             if (traceResult.hit) {
-                receivedPower =
-                    returnModel.calculate(
-                        ray,
-                        traceResult.surfaceHit,
-                        antennaGain);
+                receivedPower = returnModel.calculate(
+                    ray,
+                    traceResult.surfaceHit,
+                    antennaGain);
 
-                rangeContributions.push_back({
-                    traceResult.surfaceHit.distanceM,
-                    receivedPower,
-                    sample.weight
-                });
+                rangeContributions.push_back(
+                    {traceResult.surfaceHit.distanceM,
+                     receivedPower,
+                     sample.weight});
             }
 
             debug::recordRay(
@@ -182,13 +158,9 @@ RadarFrame FmcwRadar::scan(
             ++rayIndex;
         }
 
-        rangeProcessor.process(
-            profile,
-            rangeContributions);
+        rangeProcessor.process(profile, rangeContributions);
 
-        noise_->apply(
-            profile,
-            scanController.noiseContext(step));
+        noise_->apply(profile, scanController.noiseContext(step));
 
         frame.profiles.push_back(std::move(profile));
     }
@@ -196,13 +168,13 @@ RadarFrame FmcwRadar::scan(
     return frame;
 }
 
-
 // ============================================================
 // CONFIG ACCESS
 // ============================================================
 
-const FmcwRadarConfig& FmcwRadar::config() const {
+const FmcwRadarConfig& FmcwRadar::config() const
+{
     return config_;
 }
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

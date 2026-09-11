@@ -27,9 +27,8 @@ struct RangeContribution {
  * They are not hand-selected blur weights.
  */
 class FmcwRangeProcessor {
-  public:
-    explicit FmcwRangeProcessor(
-        const FmcwRadarConfig& config);
+public:
+    explicit FmcwRangeProcessor(const FmcwRadarConfig& config);
 
     void process(
         AzimuthProfile& profile,
@@ -37,12 +36,10 @@ class FmcwRangeProcessor {
 
     double rangeBinSpacingM() const;
 
-  private:
-    std::complex<double> dirichletResponse(
-        double binOffset) const;
+private:
+    std::complex<double> dirichletResponse(double binOffset) const;
 
-    std::complex<double> periodicHannResponse(
-        double binOffset) const;
+    std::complex<double> periodicHannResponse(double binOffset) const;
 
     const FmcwRadarConfig& config_;
 
@@ -55,4 +52,4 @@ class FmcwRangeProcessor {
     std::size_t maximumResponseHalfWidthBins_{0};
 };
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

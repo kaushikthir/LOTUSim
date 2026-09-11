@@ -7,10 +7,10 @@
 namespace fmcw_radar {
 
 class IBeamSampler {
-  public:
+public:
     virtual ~IBeamSampler() = default;
 
     virtual const std::vector<BeamSample>& samples() const = 0;
 };
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

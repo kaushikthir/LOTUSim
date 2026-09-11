@@ -24,4 +24,4 @@ double wavelengthM(double frequencyHz);
  */
 Vec3 directionFromAngles(double azimuthRad, double elevationRad);
 
-} // namespace fmcw_radar::math
+}  // namespace fmcw_radar::math

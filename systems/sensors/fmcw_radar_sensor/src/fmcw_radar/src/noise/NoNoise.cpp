@@ -2,7 +2,8 @@
 
 namespace fmcw_radar {
 
-void NoNoise::apply(AzimuthProfile& profile, const NoiseContext& context) const {
+void NoNoise::apply(AzimuthProfile& profile, const NoiseContext& context) const
+{
     (void)profile;
     (void)context;
 
@@ -10,4 +11,4 @@ void NoNoise::apply(AzimuthProfile& profile, const NoiseContext& context) const 
     // intentionally no added noise.
 }
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

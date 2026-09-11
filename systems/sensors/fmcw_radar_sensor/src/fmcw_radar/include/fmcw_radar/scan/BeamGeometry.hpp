@@ -6,13 +6,16 @@
 namespace fmcw_radar {
 
 class BeamGeometry {
-  public:
+public:
     explicit BeamGeometry(const FmcwRadarConfig& config);
 
-    Ray makeRay(const RadarPose& pose, double scanAzimuthRad, const BeamSample& sample) const;
+    Ray makeRay(
+        const RadarPose& pose,
+        double scanAzimuthRad,
+        const BeamSample& sample) const;
 
-  private:
+private:
     const FmcwRadarConfig& config_;
 };
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

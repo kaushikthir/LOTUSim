@@ -7,7 +7,7 @@
 namespace fmcw_radar {
 
 class IFmcwRadarScene {
-  public:
+public:
     virtual ~IFmcwRadarScene() = default;
 
     /*
@@ -15,9 +15,7 @@ class IFmcwRadarScene {
      *
      * Kept for simple scene backends and backwards compatibility.
      */
-    virtual bool traceNearest(
-        const Ray& ray,
-        SurfaceHit& hit) const = 0;
+    virtual bool traceNearest(const Ray& ray, SurfaceHit& hit) const = 0;
 
     /*
      * Query many rays at once.
@@ -26,17 +24,17 @@ class IFmcwRadarScene {
      * Accelerated CPU or GPU backends override this method.
      */
     virtual std::vector<RayTraceResult> traceNearestBatch(
-        const std::vector<Ray>& rays) const {
+        const std::vector<Ray>& rays) const
+    {
         std::vector<RayTraceResult> results;
         results.resize(rays.size());
 
         for (std::size_t i = 0; i < rays.size(); ++i) {
-            results[i].hit =
-                traceNearest(rays[i], results[i].surfaceHit);
+            results[i].hit = traceNearest(rays[i], results[i].surfaceHit);
         }
 
         return results;
     }
 };
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

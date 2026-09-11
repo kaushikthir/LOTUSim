@@ -8,15 +8,18 @@
 namespace fmcw_radar {
 
 class GridBeamSampler final : public IBeamSampler {
-  public:
-    GridBeamSampler(double horizontalHalfSpanRad, double verticalHalfSpanRad,
+public:
+    GridBeamSampler(
+        double horizontalHalfSpanRad,
+        double verticalHalfSpanRad,
 
-                    std::size_t horizontalSamples, std::size_t verticalSamples);
+        std::size_t horizontalSamples,
+        std::size_t verticalSamples);
 
     const std::vector<BeamSample>& samples() const override;
 
-  private:
+private:
     std::vector<BeamSample> samples_;
 };
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar

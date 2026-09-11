@@ -2,23 +2,25 @@
 
 namespace fmcw_radar::debug {
 
-void recordRay(ScanDebug* debug,
+void recordRay(
+    ScanDebug* debug,
 
-               std::size_t azimuthIndex,
+    std::size_t azimuthIndex,
 
-               double scanAzimuthRad,
+    double scanAzimuthRad,
 
-               const BeamSample& beamSample,
+    const BeamSample& beamSample,
 
-               double antennaGain,
+    double antennaGain,
 
-               const Ray& ray,
+    const Ray& ray,
 
-               bool didHit,
+    bool didHit,
 
-               const SurfaceHit& hit,
+    const SurfaceHit& hit,
 
-               double receivedPowerW) {
+    double receivedPowerW)
+{
     if (debug == nullptr) {
         return;
     }
@@ -50,4 +52,4 @@ void recordRay(ScanDebug* debug,
     debug->raysByAzimuth[azimuthIndex].push_back(event);
 }
 
-} // namespace fmcw_radar::debug
+}  // namespace fmcw_radar::debug

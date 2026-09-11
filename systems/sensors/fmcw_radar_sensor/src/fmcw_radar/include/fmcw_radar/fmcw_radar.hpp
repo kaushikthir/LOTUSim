@@ -3,9 +3,9 @@
 #include <memory>
 #include <string>
 
-#include "fmcw_radar/IFmcwRadarScene.hpp"
 #include "fmcw_radar/FmcwRadarConfig.hpp"
 #include "fmcw_radar/FmcwRadarPrimitives.hpp"
+#include "fmcw_radar/IFmcwRadarScene.hpp"
 
 namespace fmcw_radar {
 
@@ -16,7 +16,7 @@ class IBeamSampler;
 class INoiseModel;
 
 class FmcwRadar {
-  public:
+public:
     explicit FmcwRadar(const std::string& configFile);
 
     explicit FmcwRadar(const FmcwRadarConfig& config);
@@ -34,11 +34,15 @@ class FmcwRadar {
     /*
      * Main radar entry point.
      */
-    RadarFrame scan(const IFmcwRadarScene& scene, const RadarPose& pose, double timestampSeconds, ScanDebug* debug = nullptr) const;
+    RadarFrame scan(
+        const IFmcwRadarScene& scene,
+        const RadarPose& pose,
+        double timestampSeconds,
+        ScanDebug* debug = nullptr) const;
 
     const FmcwRadarConfig& config() const;
 
-  private:
+private:
     FmcwRadarConfig config_;
 
     std::unique_ptr<IAntennaPattern> antenna_;
@@ -52,4 +56,4 @@ class FmcwRadar {
     std::unique_ptr<INoiseModel> noise_;
 };
 
-} // namespace fmcw_radar
+}  // namespace fmcw_radar
