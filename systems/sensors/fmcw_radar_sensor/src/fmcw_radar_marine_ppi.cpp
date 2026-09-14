@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <sstream>
@@ -31,12 +32,22 @@ struct PpiPoint {
     std::size_t binIndex;
 };
 
+struct PpiTarget {
+    int id;
+    float x;
+    float y;
+    float strength;
+    float rangeM;
+    float bearingDeg;
+};
+
 struct PpiUiState {
     float gain{0.55f};
     float seaClutter{0.22f};
     float rainClutter{0.08f};
     float persistence{0.78f};
     bool visualSeaTexture{false};
+    bool targetOverlay{false};
 };
 
 struct Colour {
@@ -267,43 +278,89 @@ std::string formatNumber(double value, int precision)
     return stream.str();
 }
 
-Colour radarColour(float intensity)
-{
-    const float t = std::clamp(intensity, 0.0f, 1.0f);
+Colour radarColour(float intensity) {
+    const float t =
+        std::clamp(
+            intensity,
+            0.0f,
+            1.0f);
 
-    // Weak echoes: dark green.
-    if (t < 0.35f) {
-        const float u = t / 0.35f;
+    /*
+     * Monochrome green marine-radar palette.
+     *
+     * Weak noise remains clearly visible, while the
+     * strongest echoes become bright phosphor green.
+     */
 
-        return {0.0f, 0.10f + 0.52f * u, 0.08f, 0.28f + 0.38f * u};
+    // Weak noise and speckle: visible dark green.
+    if (t < 0.25f) {
+        const float u =
+            t / 0.25f;
+
+        return {
+            0.0f,
+            0.07f + 0.30f * u,
+            0.01f + 0.02f * u,
+            0.48f + 0.27f * u
+        };
     }
 
-    // Moderate echoes: green to yellow-green.
-    if (t < 0.72f) {
-        const float u = (t - 0.35f) / 0.37f;
+    // Weak-to-moderate echoes.
+    if (t < 0.60f) {
+        const float u =
+            (t - 0.25f) /
+            0.35f;
 
-        return {0.52f * u, 0.62f + 0.30f * u, 0.02f, 0.66f + 0.16f * u};
+        return {
+            0.0f + 0.025f * u,
+            0.37f + 0.34f * u,
+            0.03f + 0.04f * u,
+            0.75f + 0.10f * u
+        };
     }
 
-    // Strong echoes: yellow.
-    if (t < 0.90f) {
-        const float u = (t - 0.72f) / 0.18f;
+    // Moderate-to-strong echoes.
+    if (t < 0.85f) {
+        const float u =
+            (t - 0.60f) /
+            0.25f;
 
-        return {0.52f + 0.48f * u, 0.92f - 0.08f * u, 0.0f, 0.82f + 0.06f * u};
+        return {
+            0.025f + 0.055f * u,
+            0.71f + 0.21f * u,
+            0.07f + 0.08f * u,
+            0.85f + 0.08f * u
+        };
     }
 
-    // Very strong echoes: yellow-orange.
-    // Keep this band wide so red remains uncommon.
-    if (t < 0.985f) {
-        const float u = (t - 0.90f) / 0.085f;
+    // Strong echoes: vivid green.
+    if (t < 0.97f) {
+        const float u =
+            (t - 0.85f) /
+            0.12f;
 
-        return {1.0f, 0.84f - 0.64f * u, 0.0f, 0.90f};
+        return {
+            0.08f + 0.12f * u,
+            0.92f + 0.08f * u,
+            0.15f + 0.13f * u,
+            0.93f + 0.06f * u
+        };
     }
 
-    // Red is reserved for only the strongest echo core.
-    const float u = (t - 0.985f) / 0.015f;
+    // Strongest echo cores: extremely bright green.
+    const float u =
+        std::clamp(
+            (t - 0.97f) /
+                0.03f,
+            0.0f,
+            1.0f);
 
-    return {1.0f, 0.20f * (1.0f - u), 0.0f, 0.96f};
+    return {
+        0.20f + 0.20f * u,
+        1.0f,
+        0.28f + 0.20f * u,
+        1.0f
+    };
 }
 
 void drawPixelCircle(
@@ -330,6 +387,179 @@ void drawPixelCircle(
 
     glEnd();
     glLineWidth(1.0f);
+}
+
+std::vector<PpiTarget> detectDisplayTargets(
+    const std::vector<PpiPoint>& points,
+    double displayRangeM,
+    std::size_t maximumTargetCount) {
+
+    struct Cluster {
+        double weightedX{0.0};
+        double weightedY{0.0};
+        double weight{0.0};
+        double peak{0.0};
+        int count{0};
+    };
+
+    constexpr double CELL_SIZE = 0.055;
+    std::map<std::pair<int, int>, Cluster> clusters;
+
+    for (const PpiPoint& point : points) {
+        if (point.intensity < 0.62f ||
+            point.rangeM < 3.0f) {
+
+            continue;
+        }
+
+        const int cellX =
+            static_cast<int>(
+                std::floor(
+                    point.x / CELL_SIZE));
+
+        const int cellY =
+            static_cast<int>(
+                std::floor(
+                    point.y / CELL_SIZE));
+
+        Cluster& cluster =
+            clusters[{cellX, cellY}];
+
+        const double weight =
+            static_cast<double>(
+                point.intensity *
+                point.intensity);
+
+        cluster.weightedX +=
+            static_cast<double>(point.x) *
+            weight;
+
+        cluster.weightedY +=
+            static_cast<double>(point.y) *
+            weight;
+
+        cluster.weight += weight;
+
+        cluster.peak =
+            std::max(
+                cluster.peak,
+                static_cast<double>(
+                    point.intensity));
+
+        ++cluster.count;
+    }
+
+    struct Candidate {
+        float x;
+        float y;
+        float score;
+    };
+
+    std::vector<Candidate> candidates;
+
+    for (const auto& item : clusters) {
+        const Cluster& cluster = item.second;
+
+        if (cluster.weight <= 0.0 ||
+            cluster.count < 2) {
+
+            continue;
+        }
+
+        candidates.push_back({
+            static_cast<float>(
+                cluster.weightedX /
+                cluster.weight),
+            static_cast<float>(
+                cluster.weightedY /
+                cluster.weight),
+            static_cast<float>(
+                cluster.peak +
+                0.015 *
+                    std::min(cluster.count, 20))
+        });
+    }
+
+    std::sort(
+        candidates.begin(),
+        candidates.end(),
+        [](const Candidate& a,
+           const Candidate& b) {
+            return a.score > b.score;
+        });
+
+    std::vector<PpiTarget> targets;
+
+    for (const Candidate& candidate : candidates) {
+        bool closeToExistingTarget = false;
+
+        for (const PpiTarget& target : targets) {
+            const float dx = candidate.x - target.x;
+            const float dy = candidate.y - target.y;
+
+            if (dx * dx + dy * dy <
+                0.115f * 0.115f) {
+
+                closeToExistingTarget = true;
+                break;
+            }
+        }
+
+        if (closeToExistingTarget) {
+            continue;
+        }
+
+        const float normalisedRange =
+            std::sqrt(
+                candidate.x * candidate.x +
+                candidate.y * candidate.y);
+
+        float bearingDeg =
+            static_cast<float>(
+                std::atan2(
+                    candidate.x,
+                    candidate.y) *
+                180.0 /
+                PI);
+
+        if (bearingDeg < 0.0f) {
+            bearingDeg += 360.0f;
+        }
+
+        targets.push_back({
+            static_cast<int>(targets.size()) + 1,
+            candidate.x,
+            candidate.y,
+            std::clamp(candidate.score, 0.0f, 1.0f),
+            normalisedRange *
+                static_cast<float>(displayRangeM),
+            bearingDeg
+        });
+
+        if (targets.size() >=
+            maximumTargetCount) {
+
+            break;
+        }
+    }
+
+    std::sort(
+        targets.begin(),
+        targets.end(),
+        [](const PpiTarget& a,
+           const PpiTarget& b) {
+            return a.rangeM < b.rangeM;
+        });
+
+    for (std::size_t index = 0;
+         index < targets.size();
+         ++index) {
+
+        targets[index].id =
+            static_cast<int>(index) + 1;
+    }
+
+    return targets;
 }
 
 void drawPpiGrid(
@@ -508,110 +738,201 @@ void drawPpiReturns(
     float centreX,
     float centreY,
     float radius,
-    double displayRangeM,
-    double rangeBinSizeM,
-    const PpiUiState& ui)
-{
-    // Sweep-age fading is currently disabled.
-    (void)currentAzimuthIndex;
+    const PpiUiState& ui) {
 
-    if (azimuthCount == 0 || displayRangeM <= 0.0 || rangeBinSizeM <= 0.0) {
+    if (azimuthCount == 0 ||
+        radius <= 0.0f) {
+
         return;
     }
 
     /*
-     * Angular width represented by one azimuth sample.
+     * The complete angular width represented by one
+     * azimuth profile.
      *
-     * For 400 azimuths:
-     *     360 degrees / 400 = 0.9 degrees
+     * For 400 profiles:
+     *
+     *     360 / 400 = 0.9 degrees
      */
-    const double azimuthStepRad = 2.0 * PI / static_cast<double>(azimuthCount);
+    const double azimuthStepRad =
+        2.0 * PI /
+        static_cast<double>(azimuthCount);
+
+    const double halfAzimuthCellRad =
+        0.5 * azimuthStepRad;
 
     /*
-     * Project the real range-bin thickness onto the screen.
-     *
-     * A 0.155 m bin is smaller than one screen pixel when
-     * displaying 1000 m, so use a minimum display thickness
-     * of one pixel. This does not modify the radar data.
+     * The physical 0.155 m range bin is often much
+     * thinner than one display pixel at long display
+     * ranges. Give it a minimum raster thickness so
+     * isolated returns remain visible.
      */
-    const float physicalRangeBinThicknessPx =
-        static_cast<float>(rangeBinSizeM / displayRangeM) * radius;
+    const float minimumHalfRadialCell =
+        0.55f /
+        std::max(radius, 1.0f);
 
-    const float displayedRangeBinThicknessPx =
-        std::max(physicalRangeBinThicknessPx, 1.0f);
+    /*
+     * Persistence is temporarily disabled elsewhere in
+     * this demo, so the current sweep position is not used
+     * while drawing the completed frame.
+     */
+    (void)currentAzimuthIndex;
 
+    /*
+     * Render every radar value as an annular sector rather
+     * than as one fixed-size point.
+     */
     glBegin(GL_QUADS);
 
     for (const PpiPoint& point : points) {
-        const float gainOffset = (ui.gain - 0.50f) * 0.20f;
-
-        const float adjusted = std::pow(
-            std::clamp(point.intensity + gainOffset, 0.0f, 1.0f),
-            1.10f);
-
-        Colour colour = radarColour(adjusted);
-
-        colour.a *= 0.90f;
-
-        glColor4f(colour.r, colour.g, colour.b, colour.a);
-
-        const std::size_t wrappedAzimuthIndex =
-            point.azimuthIndex % azimuthCount;
-
-        const double centreAngle =
-            azimuthStepRad * static_cast<double>(wrappedAzimuthIndex);
-
-        /*
-         * Fill half an azimuth interval on each side.
-         *
-         * With a 0.9-degree interval, this covers:
-         *     centre - 0.45 degrees
-         *     centre + 0.45 degrees
-         */
-        const double angleStart = centreAngle - azimuthStepRad * 0.5;
-
-        const double angleEnd = centreAngle + azimuthStepRad * 0.5;
-
-        /*
-         * Use the centre of the return's range bin.
-         */
-        const double cellCentreRangeM =
-            (static_cast<double>(point.binIndex) + 0.5) * rangeBinSizeM;
-
-        const float centreRadiusPx =
-            static_cast<float>(cellCentreRangeM / displayRangeM) * radius;
-
-        if (centreRadiusPx < 0.0f || centreRadiusPx > radius) {
+        if (point.intensity <= 0.0f) {
             continue;
         }
 
-        const float innerRadiusPx = std::max(
-            0.0f,
-            centreRadiusPx - displayedRangeBinThicknessPx * 0.5f);
+        const float normalisedRadius =
+            std::sqrt(
+                point.x * point.x +
+                point.y * point.y);
 
-        const float outerRadiusPx = std::min(
-            radius,
-            centreRadiusPx + displayedRangeBinThicknessPx * 0.5f);
+        if (normalisedRadius < 0.0f ||
+            normalisedRadius > 1.0f) {
+
+            continue;
+        }
 
         /*
-         * Draw the four corners of the polar cell.
+         * point.rangeM was created using:
+         *
+         *     (binIndex + 0.5) * rangeBinSize
+         *
+         * Therefore:
+         *
+         *     half bin width / display range
+         *       = normalisedRadius / (2*binIndex + 1)
          */
+        const float exactHalfRadialCell =
+            normalisedRadius /
+            (2.0f *
+                 static_cast<float>(point.binIndex) +
+             1.0f);
+
+        const float halfRadialCell =
+            std::max(
+                exactHalfRadialCell,
+                minimumHalfRadialCell);
+
+        const float innerRadius =
+            std::max(
+                0.0f,
+                normalisedRadius -
+                    halfRadialCell);
+
+        const float outerRadius =
+            std::min(
+                1.0f,
+                normalisedRadius +
+                    halfRadialCell);
+
+        /*
+         * buildPpiPoints uses:
+         *
+         *     x = r sin(theta)
+         *     y = r cos(theta)
+         *
+         * so recover theta using atan2(x, y).
+         */
+        const double centreAngle =
+            std::atan2(
+                static_cast<double>(point.x),
+                static_cast<double>(point.y));
+
+        const double angle0 =
+            centreAngle -
+            halfAzimuthCellRad;
+
+        const double angle1 =
+            centreAngle +
+            halfAzimuthCellRad;
+
+        const float gainOffset =
+            (ui.gain - 0.50f) *
+            0.20f;
+
+        const float adjusted =
+            std::pow(
+                std::clamp(
+                    point.intensity +
+                        gainOffset,
+                    0.0f,
+                    1.0f),
+                1.10f);
+
+        Colour colour =
+            radarColour(adjusted);
+
+        colour.a *= 0.92f;
+
+        glColor4f(
+            colour.r,
+            colour.g,
+            colour.b,
+            colour.a);
+
+        /*
+         * Four corners of one polar radar cell:
+         *
+         *     inner radius, lower angle
+         *     outer radius, lower angle
+         *     outer radius, upper angle
+         *     inner radius, upper angle
+         */
+        glVertex2f(
+            centreX +
+                radius *
+                innerRadius *
+                static_cast<float>(
+                    std::sin(angle0)),
+            centreY -
+                radius *
+                innerRadius *
+                static_cast<float>(
+                    std::cos(angle0)));
 
         glVertex2f(
-            centreX + innerRadiusPx * static_cast<float>(std::sin(angleStart)),
-            centreY - innerRadiusPx * static_cast<float>(std::cos(angleStart)));
+            centreX +
+                radius *
+                outerRadius *
+                static_cast<float>(
+                    std::sin(angle0)),
+            centreY -
+                radius *
+                outerRadius *
+                static_cast<float>(
+                    std::cos(angle0)));
 
         glVertex2f(
-            centreX + outerRadiusPx * static_cast<float>(std::sin(angleStart)),
-            centreY - outerRadiusPx * static_cast<float>(std::cos(angleStart)));
+            centreX +
+                radius *
+                outerRadius *
+                static_cast<float>(
+                    std::sin(angle1)),
+            centreY -
+                radius *
+                outerRadius *
+                static_cast<float>(
+                    std::cos(angle1)));
 
         glVertex2f(
-            centreX + outerRadiusPx * static_cast<float>(std::sin(angleEnd)),
-            centreY - outerRadiusPx * static_cast<float>(std::cos(angleEnd)));
-
-        glVertex2f(
-            centreX + innerRadiusPx * static_cast<float>(std::sin(angleEnd)),
-            centreY - innerRadiusPx * static_cast<float>(std::cos(angleEnd)));
+            centreX +
+                radius *
+                innerRadius *
+                static_cast<float>(
+                    std::sin(angle1)),
+            centreY -
+                radius *
+                innerRadius *
+                static_cast<float>(
+                    std::cos(angle1)));
     }
 
     glEnd();
@@ -678,6 +999,106 @@ void drawOwnShip(float centreX, float centreY, float radius)
     glLineWidth(1.0f);
 }
 
+void drawTargetBracket(
+    float x,
+    float y,
+    float size,
+    Colour colour) {
+
+    const float corner = size * 0.34f;
+
+    glColor4f(colour.r, colour.g, colour.b, colour.a);
+    glLineWidth(1.8f);
+    glBegin(GL_LINES);
+
+    glVertex2f(x - size, y - size);
+    glVertex2f(x - size + corner, y - size);
+    glVertex2f(x - size, y - size);
+    glVertex2f(x - size, y - size + corner);
+
+    glVertex2f(x + size, y - size);
+    glVertex2f(x + size - corner, y - size);
+    glVertex2f(x + size, y - size);
+    glVertex2f(x + size, y - size + corner);
+
+    glVertex2f(x - size, y + size);
+    glVertex2f(x - size + corner, y + size);
+    glVertex2f(x - size, y + size);
+    glVertex2f(x - size, y + size - corner);
+
+    glVertex2f(x + size, y + size);
+    glVertex2f(x + size - corner, y + size);
+    glVertex2f(x + size, y + size);
+    glVertex2f(x + size, y + size - corner);
+
+    glEnd();
+    glLineWidth(1.0f);
+}
+
+void drawTargets(
+    const std::vector<PpiTarget>& targets,
+    float centreX,
+    float centreY,
+    float radius,
+    bool enabled) {
+
+    if (!enabled) {
+        return;
+    }
+
+    for (const PpiTarget& target : targets) {
+        const float x =
+            centreX +
+            target.x * radius;
+
+        const float y =
+            centreY -
+            target.y * radius;
+
+        const bool nearest =
+            target.id == 1;
+
+        const Colour colour =
+            nearest ?
+                Colour{1.0f, 0.16f, 0.08f, 1.0f} :
+                Colour{0.10f, 1.0f, 0.28f, 1.0f};
+
+        drawTargetBracket(
+            x,
+            y,
+            nearest ? 14.0f : 11.0f,
+            colour);
+
+        drawText(
+            x + 16.0f,
+            y - 4.0f,
+            1.6f,
+            std::to_string(target.id),
+            colour);
+
+        if (nearest) {
+            drawPixelCircle(
+                x,
+                y,
+                5.0f,
+                colour,
+                2.0f,
+                24);
+
+            glColor4f(
+                1.0f,
+                0.18f,
+                0.08f,
+                0.45f);
+
+            glBegin(GL_LINES);
+            glVertex2f(centreX, centreY);
+            glVertex2f(x, y);
+            glEnd();
+        }
+    }
+}
+
 void drawControlBox(
     float x,
     float y,
@@ -706,8 +1127,8 @@ void drawTopStatus(
     float leftPanelWidth,
     float rightPanelWidth,
     double displayRangeM,
-    double rotationRateHz)
-{
+    double rotationRateHz) {
+
     constexpr float TOP_HEIGHT = 58.0f;
 
     drawFilledRect(
@@ -724,7 +1145,12 @@ void drawTopStatus(
         TOP_HEIGHT,
         {0.12f, 0.34f, 0.24f, 0.95f});
 
-    drawText(18.0f, 12.0f, 1.6f, "RANGE", {0.15f, 1.0f, 0.25f, 1.0f});
+    drawText(
+        18.0f,
+        12.0f,
+        1.6f,
+        "RANGE",
+        {0.15f, 1.0f, 0.25f, 1.0f});
 
     drawText(
         18.0f,
@@ -733,34 +1159,42 @@ void drawTopStatus(
         formatNumber(displayRangeM, 0) + " M",
         {0.18f, 1.0f, 0.28f, 1.0f});
 
-    const float centreStart = leftPanelWidth;
+    const float centreStart =
+        leftPanelWidth;
 
-    const float centreEnd = static_cast<float>(width) - rightPanelWidth;
+    const float centreEnd =
+        static_cast<float>(width) -
+        rightPanelWidth;
 
     drawTextCentred(
         (centreStart + centreEnd) * 0.5f,
         13.0f,
         2.0f,
-        "FMCW RADAR MARINE PPI",
+        "MAS10 HIGH RESOLUTION MARINE PPI",
         {0.22f, 1.0f, 0.30f, 1.0f});
 
     drawTextCentred(
         (centreStart + centreEnd) * 0.5f,
         36.0f,
         1.3f,
-        "H-UP    RELATIVE MOTION    SCAN " + formatNumber(rotationRateHz, 1) +
+        "H-UP    RELATIVE MOTION    SCAN " +
+            formatNumber(rotationRateHz, 1) +
             " HZ",
         {0.60f, 0.82f, 0.65f, 0.95f});
 
     drawText(
-        static_cast<float>(width) - rightPanelWidth + 18.0f,
+        static_cast<float>(width) -
+            rightPanelWidth +
+            18.0f,
         11.0f,
         1.45f,
         "HDG 000.0 DEG",
         {0.20f, 1.0f, 0.28f, 1.0f});
 
     drawText(
-        static_cast<float>(width) - rightPanelWidth + 18.0f,
+        static_cast<float>(width) -
+            rightPanelWidth +
+            18.0f,
         33.0f,
         1.45f,
         "SPD 0.0 KN",
@@ -881,9 +1315,10 @@ void drawRightPanel(
     float x,
     float width,
     int height,
+    const std::vector<PpiTarget>& targets,
     std::size_t azimuthCount,
-    double rangeBinSizeM)
-{
+    double rangeBinSizeM) {
+
     constexpr float TOP_HEIGHT = 58.0f;
     constexpr float BOTTOM_HEIGHT = 72.0f;
     constexpr float MARGIN = 10.0f;
@@ -892,71 +1327,223 @@ void drawRightPanel(
         x,
         TOP_HEIGHT,
         width,
-        static_cast<float>(height) - TOP_HEIGHT - BOTTOM_HEIGHT,
+        static_cast<float>(height) -
+            TOP_HEIGHT -
+            BOTTOM_HEIGHT,
         {0.008f, 0.014f, 0.013f, 0.99f});
 
     const float innerX = x + MARGIN;
     const float innerWidth = width - 2.0f * MARGIN;
     float y = TOP_HEIGHT + MARGIN;
 
-    drawRect(innerX, y, innerWidth, 250.0f, {0.17f, 0.29f, 0.24f, 1.0f});
+    drawRect(
+        innerX,
+        y,
+        innerWidth,
+        245.0f,
+        {0.17f, 0.29f, 0.24f, 1.0f});
 
     drawTextCentred(
         innerX + innerWidth * 0.5f,
-        y + 12.0f,
+        y + 10.0f,
         1.55f,
-        "RADAR INFORMATION",
+        "TARGET LIST",
         {0.85f, 0.88f, 0.85f, 1.0f});
 
     drawText(
-        innerX + 12.0f,
-        y + 52.0f,
-        1.25f,
-        "RAW ECHO DISPLAY",
-        {0.18f, 1.0f, 0.28f, 1.0f});
-
-    drawText(
-        innerX + 12.0f,
-        y + 82.0f,
+        innerX + 10.0f,
+        y + 36.0f,
         1.15f,
-        "TARGET PROCESSING OFF",
-        {0.62f, 0.76f, 0.65f, 1.0f});
+        "ID   BRG     RNG     STR",
+        {0.60f, 0.72f, 0.64f, 1.0f});
+
+    float rowY = y + 62.0f;
+
+    for (std::size_t index = 0;
+         index < std::min<std::size_t>(
+             targets.size(),
+             6);
+         ++index) {
+
+        const PpiTarget& target =
+            targets[index];
+
+        std::ostringstream row;
+        row
+            << std::setw(2)
+            << target.id
+            << "  "
+            << std::setw(5)
+            << std::setfill('0')
+            << std::fixed
+            << std::setprecision(1)
+            << target.bearingDeg
+            << "  "
+            << std::setfill(' ')
+            << std::setw(5)
+            << std::setprecision(0)
+            << target.rangeM
+            << "M  "
+            << std::setw(3)
+            << static_cast<int>(
+                target.strength *
+                100.0f);
+
+        drawText(
+            innerX + 10.0f,
+            rowY,
+            1.12f,
+            row.str(),
+            index == 0 ?
+                Colour{1.0f, 0.24f, 0.10f, 1.0f} :
+                Colour{0.78f, 0.84f, 0.78f, 1.0f});
+
+        rowY += 28.0f;
+    }
+
+    if (targets.empty()) {
+        drawText(
+            innerX + 10.0f,
+            rowY,
+            1.2f,
+            "NO STRONG TARGETS",
+            {0.58f, 0.66f, 0.60f, 1.0f});
+    }
+
+    y += 257.0f;
+
+    drawRect(
+        innerX,
+        y,
+        innerWidth,
+        142.0f,
+        {0.17f, 0.29f, 0.24f, 1.0f});
 
     drawText(
-        innerX + 12.0f,
-        y + 124.0f,
+        innerX + 10.0f,
+        y + 10.0f,
+        1.45f,
+        "SCAN INFORMATION",
+        {0.82f, 0.86f, 0.82f, 1.0f});
+
+    drawText(
+        innerX + 10.0f,
+        y + 42.0f,
         1.16f,
-        "AZIMUTHS " + std::to_string(azimuthCount),
+        "AZIMUTHS " +
+            std::to_string(azimuthCount),
         {0.64f, 0.78f, 0.66f, 1.0f});
 
     drawText(
-        innerX + 12.0f,
-        y + 154.0f,
+        innerX + 10.0f,
+        y + 68.0f,
         1.16f,
         "AZ STEP " +
             formatNumber(
-                azimuthCount > 0 ? 360.0 / static_cast<double>(azimuthCount)
-                                 : 0.0,
+                azimuthCount > 0 ?
+                    360.0 /
+                        static_cast<double>(
+                            azimuthCount) :
+                    0.0,
                 2) +
             " DEG",
         {0.64f, 0.78f, 0.66f, 1.0f});
 
     drawText(
-        innerX + 12.0f,
-        y + 184.0f,
+        innerX + 10.0f,
+        y + 94.0f,
         1.16f,
-        "RANGE BIN " + formatNumber(rangeBinSizeM, 3) + " M",
+        "RANGE BIN " +
+            formatNumber(
+                rangeBinSizeM,
+                3) +
+            " M",
         {0.64f, 0.78f, 0.66f, 1.0f});
+
+    y += 154.0f;
+
+    const float alarmHeight =
+        static_cast<float>(height) -
+        BOTTOM_HEIGHT -
+        y -
+        MARGIN;
+
+    drawRect(
+        innerX,
+        y,
+        innerWidth,
+        alarmHeight,
+        {0.72f, 0.08f, 0.05f, 1.0f},
+        1.6f);
+
+    drawText(
+        innerX + 10.0f,
+        y + 10.0f,
+        1.55f,
+        "ALARMS",
+        {1.0f, 0.16f, 0.08f, 1.0f});
+
+    if (!targets.empty()) {
+        const PpiTarget& nearest =
+            targets.front();
+
+        drawText(
+            innerX + 10.0f,
+            y + 44.0f,
+            1.25f,
+            "NEAREST TARGET",
+            {1.0f, 0.20f, 0.08f, 1.0f});
+
+        drawText(
+            innerX + 10.0f,
+            y + 72.0f,
+            1.2f,
+            "ID " +
+                std::to_string(nearest.id),
+            {1.0f, 0.22f, 0.10f, 1.0f});
+
+        drawText(
+            innerX + 10.0f,
+            y + 98.0f,
+            1.2f,
+            "BRG " +
+                formatNumber(
+                    nearest.bearingDeg,
+                    1) +
+                " DEG",
+            {1.0f, 0.22f, 0.10f, 1.0f});
+
+        drawText(
+            innerX + 10.0f,
+            y + 124.0f,
+            1.2f,
+            "RNG " +
+                formatNumber(
+                    nearest.rangeM,
+                    1) +
+                " M",
+            {1.0f, 0.22f, 0.10f, 1.0f});
+    }
+    else {
+        drawText(
+            innerX + 10.0f,
+            y + 48.0f,
+            1.2f,
+            "NO ACTIVE ALARMS",
+            {0.48f, 0.70f, 0.52f, 1.0f});
+    }
 }
 
 void drawBottomBar(
     int width,
     int height,
     float leftPanelWidth,
-    float rightPanelWidth)
-{
+    float rightPanelWidth) {
+
     constexpr float BOTTOM_HEIGHT = 72.0f;
-    const float y = static_cast<float>(height) - BOTTOM_HEIGHT;
+    const float y =
+        static_cast<float>(height) -
+        BOTTOM_HEIGHT;
 
     drawFilledRect(
         0.0f,
@@ -972,22 +1559,40 @@ void drawBottomBar(
         BOTTOM_HEIGHT,
         {0.14f, 0.28f, 0.22f, 1.0f});
 
-    const std::vector<std::string>
-        buttons{"MENU", "TRAILS ON", "SEA AUTO", "RAIN OFF", "MARK", "EVENT"};
+    const std::vector<std::string> buttons{
+        "MENU",
+        "TARGET",
+        "TRAILS ON",
+        "SEA AUTO",
+        "RAIN OFF",
+        "MARK",
+        "EVENT"
+    };
 
-    const float startX = leftPanelWidth + 10.0f;
+    const float startX =
+        leftPanelWidth + 10.0f;
 
-    const float endX = static_cast<float>(width) - rightPanelWidth - 10.0f;
+    const float endX =
+        static_cast<float>(width) -
+        rightPanelWidth -
+        10.0f;
 
     const float gap = 7.0f;
 
     const float buttonWidth =
-        (endX - startX - gap * static_cast<float>(buttons.size() - 1)) /
+        (endX - startX -
+         gap *
+             static_cast<float>(buttons.size() - 1)) /
         static_cast<float>(buttons.size());
 
-    for (std::size_t index = 0; index < buttons.size(); ++index) {
+    for (std::size_t index = 0;
+         index < buttons.size();
+         ++index) {
+
         const float x =
-            startX + static_cast<float>(index) * (buttonWidth + gap);
+            startX +
+            static_cast<float>(index) *
+                (buttonWidth + gap);
 
         drawFilledRect(
             x,
@@ -1008,8 +1613,9 @@ void drawBottomBar(
             y + 28.0f,
             1.2f,
             buttons[index],
-            index == 1 ? Colour{0.18f, 1.0f, 0.28f, 1.0f}
-                       : Colour{0.72f, 0.78f, 0.73f, 1.0f});
+            index == 2 ?
+                Colour{0.18f, 1.0f, 0.28f, 1.0f} :
+                Colour{0.72f, 0.78f, 0.73f, 1.0f});
     }
 }
 
@@ -1221,6 +1827,7 @@ void DrawRadarSelector(
 void drawPpiWindow(
     GLFWwindow* window,
     const std::vector<PpiPoint>& points,
+    const std::vector<PpiTarget>& targets,
     std::size_t currentAzimuthIndex,
     double currentAzimuthRad,
     std::size_t azimuthCount,
@@ -1233,6 +1840,10 @@ void drawPpiWindow(
     const std::string& selectedRadarTopic,
     bool radarSelectorOpen)
 {
+    // The newer standalone display hides the sweep line, so the
+    // sweep angle is intentionally unused by the renderer.
+    (void)currentAzimuthRad;
+
     glfwMakeContextCurrent(window);
 
     int width = 0;
@@ -1318,6 +1929,7 @@ void drawPpiWindow(
         static_cast<float>(width) - rightPanelWidth,
         rightPanelWidth,
         height,
+        targets,
         azimuthCount,
         rangeBinSizeM);
 
@@ -1341,11 +1953,16 @@ void drawPpiWindow(
         centreX,
         centreY,
         radius,
-        displayRangeM,
-        rangeBinSizeM,
         ui);
 
-    drawPpiSweep(currentAzimuthRad, centreX, centreY, radius);
+    // drawPpiSweep(currentAzimuthRad, centreX, centreY, radius);
+
+    drawTargets(
+        targets,
+        centreX,
+        centreY,
+        radius,
+        ui.targetOverlay);
 
     drawOwnShip(centreX, centreY, radius);
 
@@ -1483,6 +2100,11 @@ public:
         return points_;
     }
 
+    const std::vector<PpiTarget>& Targets() const
+    {
+        return targets_;
+    }
+
     std::size_t AzimuthCount() const
     {
         return std::max<std::size_t>(1, azimuthCount_);
@@ -1554,6 +2176,7 @@ private:
     void ClearRadarData()
     {
         points_.clear();
+        targets_.clear();
         azimuthCount_ = 400;
         rangeBinSizeM_ = 0.155;
         rotationRateHz_ = 2.0;
@@ -1634,6 +2257,7 @@ private:
         points_.clear();
 
         if (!(maximumPowerW > 0.0)) {
+            targets_.clear();
             return;
         }
 
@@ -1675,6 +2299,8 @@ private:
                  static_cast<std::size_t>(
                      std::floor(rangeM / rangeBinSizeM_))});
         }
+
+        targets_ = detectDisplayTargets(points_, displayRangeM_, 6);
     }
 
     std::string requestedTopic_;
@@ -1694,6 +2320,7 @@ private:
     PpiUiState ui_;
 
     std::vector<PpiPoint> points_;
+    std::vector<PpiTarget> targets_;
 
     rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr
         subscription_;
@@ -1714,7 +2341,7 @@ int main(int argc, char** argv)
     }
 
     GLFWwindow* window =
-        glfwCreateWindow(1160, 820, "FMCW Radar Marine PPI", nullptr, nullptr);
+        glfwCreateWindow(1160, 820, "MAS10 Detailed Marine PPI", nullptr, nullptr);
 
     if (!window) {
         glfwTerminate();
@@ -1786,6 +2413,7 @@ int main(int argc, char** argv)
         drawPpiWindow(
             window,
             node->Points(),
+            node->Targets(),
             azimuthIndex,
             azimuthRad,
             azimuthCount,
