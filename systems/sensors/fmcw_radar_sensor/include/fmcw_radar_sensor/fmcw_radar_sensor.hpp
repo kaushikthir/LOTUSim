@@ -5,8 +5,10 @@
 #include <gz/math/Vector3.hh>
 #include <gz/sim/Entity.hh>
 #include <memory>
+#include <sdf/Geometry.hh>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "fmcw_radar/IFmcwRadarScene.hpp"
@@ -41,16 +43,12 @@ public:
         const std::vector<fmcw_radar::Ray>& rays) const override;
 
 private:
-    struct CachedTriangle {
-        gz::math::Vector3d a;
-        gz::math::Vector3d b;
-        gz::math::Vector3d c;
-
-        gz::math::Vector3d normal;
-        gz::math::Vector3d boundsMin;
-        gz::math::Vector3d boundsMax;
-        gz::math::Vector3d centroid;
-
+    /*
+     * Per-collision data that does not change between scans: identity,
+     * names, and the triangulated shape in the collision's own frame.
+     * Built once per collision entity and reused every scan.
+     */
+    struct CollisionGeometry {
         std::int64_t objectId{-1};
         std::string objectName;
 
@@ -62,6 +60,23 @@ private:
 
         std::int32_t materialId{-1};
         std::string materialName;
+
+        // Three entries per triangle, scale already applied.
+        std::vector<gz::math::Vector3d> localVertices;
+    };
+
+    struct CachedTriangle {
+        gz::math::Vector3d a;
+        gz::math::Vector3d b;
+        gz::math::Vector3d c;
+
+        gz::math::Vector3d normal;
+        gz::math::Vector3d boundsMin;
+        gz::math::Vector3d boundsMax;
+        gz::math::Vector3d centroid;
+
+        // Points into m_collision_cache, which is not modified during a scan.
+        const CollisionGeometry* source{nullptr};
     };
 
     struct BvhNode {
@@ -81,6 +96,12 @@ private:
     };
 
     void RebuildGeometryCache(const gz::sim::EntityComponentManager& ecm);
+
+    const CollisionGeometry& CachedCollisionGeometry(
+        gz::sim::Entity collision_entity,
+        gz::sim::Entity owner_model,
+        const sdf::Geometry& geometry,
+        const gz::sim::EntityComponentManager& ecm);
 
     int BuildBvhNode(std::size_t start, std::size_t count);
 
@@ -111,16 +132,15 @@ private:
 
     std::unique_ptr<fmcw_radar::FmcwRadar> m_radar_model;
 
-    gz::sim::Entity m_vessel_entity_id;
     gz::sim::Entity m_sensor_entity_id;
+
+    std::unordered_map<gz::sim::Entity, CollisionGeometry> m_collision_cache;
 
     std::vector<CachedTriangle> m_triangles;
     std::vector<BvhNode> m_bvh_nodes;
     int m_bvh_root{-1};
 
     double m_max_range_m{1000.0};
-
-    double m_ppi_dynamic_range_db{60.0};
 
     std::size_t m_collision_count{0};
 

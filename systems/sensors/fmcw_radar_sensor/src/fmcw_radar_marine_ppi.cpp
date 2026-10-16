@@ -46,7 +46,7 @@ struct PpiUiState {
     float seaClutter{0.22f};
     float rainClutter{0.08f};
     float persistence{0.78f};
-    bool visualSeaTexture{false};
+    bool visualSeaTexture{true};
     bool targetOverlay{false};
 };
 
@@ -369,7 +369,7 @@ void drawPixelCircle(
     float radius,
     Colour colour,
     float lineWidth = 1.0f,
-    int segmentCount = 256)
+    int segmentCount = 512)
 {
     glLineWidth(lineWidth);
     glColor4f(colour.r, colour.g, colour.b, colour.a);
@@ -684,51 +684,162 @@ void drawDisplaySeaTexture(
     double timeSeconds,
     const PpiUiState& ui)
 {
-    if (!ui.visualSeaTexture || ui.seaClutter <= 0.0f) {
+    if (ui.seaClutter <= 0.0f) {
         return;
     }
 
-    const int pointCount = 900 + static_cast<int>(2400.0f * ui.seaClutter);
+    /*
+     * DISPLAY-ONLY radar phosphor texture.
+     *
+     * Dark green near centre.
+     * Increasingly luminous green toward outer range.
+     * Fine moving grain over a continuous green base.
+     */
 
-    glPointSize(1.5f);
-    glBegin(GL_POINTS);
+    // --------------------------------------------------------
+    // Continuous radial green background.
+    // Prevents black holes between grains.
+    // --------------------------------------------------------
+    glBegin(GL_TRIANGLE_FAN);
 
-    for (int index = 0; index < pointCount; ++index) {
-        const float u = hashUnit(static_cast<std::uint32_t>(index * 11 + 19));
+    glColor4f(
+        0.0f,
+        0.072f,
+        0.005f,
+        1.0f);
 
-        const float v = hashUnit(static_cast<std::uint32_t>(index * 23 + 71));
+    glVertex2f(
+        centreX,
+        centreY);
 
-        const float radiusNormalised = std::sqrt(u);
+    constexpr int SEGMENTS = 256;
 
-        if (radiusNormalised < 0.08f) {
-            continue;
-        }
-
-        const float angle = 2.0f * static_cast<float>(PI) * v;
-
-        const float twinkle =
-            0.5f +
-            0.5f * std::sin(
-                       static_cast<float>(timeSeconds) * (0.8f + 1.6f * u) +
-                       static_cast<float>(index));
-
-        const float nearField = 1.0f - std::clamp(radiusNormalised, 0.0f, 1.0f);
-
-        const float strength = ui.seaClutter * (0.18f + 0.75f * nearField) *
-                               (0.25f + 0.75f * twinkle);
+    for (int i = 0; i <= SEGMENTS; ++i) {
+        const float a =
+            2.0f *
+            static_cast<float>(PI) *
+            static_cast<float>(i) /
+            static_cast<float>(SEGMENTS);
 
         glColor4f(
             0.0f,
-            0.18f + 0.40f * strength,
-            0.24f + 0.32f * strength,
-            0.15f + 0.32f * strength);
+            0.245f,
+            0.013f,
+            1.0f);
 
         glVertex2f(
-            centreX + radius * radiusNormalised * std::cos(angle),
-            centreY + radius * radiusNormalised * std::sin(angle));
+            centreX + radius * std::cos(a),
+            centreY + radius * std::sin(a));
     }
 
     glEnd();
+
+
+    // --------------------------------------------------------
+    // Fine phosphor grain.
+    // --------------------------------------------------------
+    constexpr int POINT_COUNT = 450000;
+
+    glPointSize(1.0f);
+    glBegin(GL_POINTS);
+
+    const float t =
+        static_cast<float>(timeSeconds);
+
+    for (int index = 0;
+         index < POINT_COUNT;
+         ++index)
+    {
+        const float u =
+            hashUnit(
+                static_cast<std::uint32_t>(
+                    index * 17 + 31));
+
+        const float v =
+            hashUnit(
+                static_cast<std::uint32_t>(
+                    index * 29 + 97));
+
+        const float n =
+            hashUnit(
+                static_cast<std::uint32_t>(
+                    index * 47 + 211));
+
+        float r =
+            std::sqrt(u);
+
+        const float baseAngle =
+            2.0f *
+            static_cast<float>(PI) *
+            v;
+
+        /*
+         * Very small motion only.
+         * Enough to make the phosphor field feel alive
+         * without visibly swirling.
+         */
+        const float angle =
+            baseAngle +
+            0.006f *
+                std::sin(
+                    t * 0.55f +
+                    static_cast<float>(index) *
+                        0.017f);
+
+        r +=
+            0.0025f *
+            std::sin(
+                t * 0.38f +
+                static_cast<float>(index) *
+                    0.031f);
+
+        r =
+            std::clamp(
+                r,
+                0.0f,
+                1.0f);
+
+        /*
+         * Centre remains dark green.
+         * Outer range becomes increasingly luminous.
+         */
+        const float radial =
+            0.38f +
+            0.62f *
+                std::pow(
+                    r,
+                    1.10f);
+
+        const float green =
+            radial *
+            (0.30f +
+             0.30f * n);
+
+        const float alpha =
+            0.48f +
+            0.20f * n;
+
+        glColor4f(
+            0.0f,
+            green,
+            0.006f,
+            alpha);
+
+        glVertex2f(
+            centreX +
+                radius *
+                r *
+                std::cos(angle),
+
+            centreY +
+                radius *
+                r *
+                std::sin(angle));
+    }
+
+    glEnd();
+
+    glPointSize(1.0f);
 }
 
 void drawPpiReturns(
@@ -738,204 +849,183 @@ void drawPpiReturns(
     float centreX,
     float centreY,
     float radius,
-    const PpiUiState& ui) {
+    const PpiUiState& ui)
+{
+    (void)currentAzimuthIndex;
 
-    if (azimuthCount == 0 ||
-        radius <= 0.0f) {
-
+    if (azimuthCount == 0 || radius <= 0.0f) {
         return;
     }
 
-    /*
-     * The complete angular width represented by one
-     * azimuth profile.
-     *
-     * For 400 profiles:
-     *
-     *     360 / 400 = 0.9 degrees
-     */
-    const double azimuthStepRad =
+    const double azimuthStep =
         2.0 * PI /
         static_cast<double>(azimuthCount);
 
-    const double halfAzimuthCellRad =
-        0.5 * azimuthStepRad;
+    constexpr std::array<float, 5> AZ_OFFSETS{
+        -0.38f,
+        -0.19f,
+         0.00f,
+         0.19f,
+         0.38f
+    };
 
-    /*
-     * The physical 0.155 m range bin is often much
-     * thinner than one display pixel at long display
-     * ranges. Give it a minimum raster thickness so
-     * isolated returns remain visible.
-     */
-    const float minimumHalfRadialCell =
-        0.55f /
-        std::max(radius, 1.0f);
+    constexpr std::array<float, 5> AZ_ALPHA{
+        0.25f,
+        0.55f,
+        1.00f,
+        0.55f,
+        0.25f
+    };
 
-    /*
-     * Persistence is temporarily disabled elsewhere in
-     * this demo, so the current sweep position is not used
-     * while drawing the completed frame.
-     */
-    (void)currentAzimuthIndex;
+    // ========================================================
+    // SUBTLE VERTICAL PSF
+    // Up/down only, faint.
+    // ========================================================
 
-    /*
-     * Render every radar value as an annular sector rather
-     * than as one fixed-size point.
-     */
-    glBegin(GL_QUADS);
+    glPointSize(2.6f);
+    glBegin(GL_POINTS);
 
     for (const PpiPoint& point : points) {
+
         if (point.intensity <= 0.0f) {
             continue;
         }
 
-        const float normalisedRadius =
-            std::sqrt(
-                point.x * point.x +
-                point.y * point.y);
-
-        if (normalisedRadius < 0.0f ||
-            normalisedRadius > 1.0f) {
-
-            continue;
-        }
-
-        /*
-         * point.rangeM was created using:
-         *
-         *     (binIndex + 0.5) * rangeBinSize
-         *
-         * Therefore:
-         *
-         *     half bin width / display range
-         *       = normalisedRadius / (2*binIndex + 1)
-         */
-        const float exactHalfRadialCell =
-            normalisedRadius /
-            (2.0f *
-                 static_cast<float>(point.binIndex) +
-             1.0f);
-
-        const float halfRadialCell =
-            std::max(
-                exactHalfRadialCell,
-                minimumHalfRadialCell);
-
-        const float innerRadius =
-            std::max(
-                0.0f,
-                normalisedRadius -
-                    halfRadialCell);
-
-        const float outerRadius =
-            std::min(
-                1.0f,
-                normalisedRadius +
-                    halfRadialCell);
-
-        /*
-         * buildPpiPoints uses:
-         *
-         *     x = r sin(theta)
-         *     y = r cos(theta)
-         *
-         * so recover theta using atan2(x, y).
-         */
-        const double centreAngle =
-            std::atan2(
-                static_cast<double>(point.x),
-                static_cast<double>(point.y));
-
-        const double angle0 =
-            centreAngle -
-            halfAzimuthCellRad;
-
-        const double angle1 =
-            centreAngle +
-            halfAzimuthCellRad;
-
         const float gainOffset =
-            (ui.gain - 0.50f) *
-            0.20f;
+            (ui.gain - 0.50f) * 0.20f;
 
         const float adjusted =
             std::pow(
                 std::clamp(
-                    point.intensity +
-                        gainOffset,
+                    point.intensity + gainOffset,
                     0.0f,
                     1.0f),
                 1.10f);
 
-        Colour colour =
+        if (adjusted < 0.10f) {
+            continue;
+        }
+
+        const Colour colour =
             radarColour(adjusted);
 
-        colour.a *= 0.92f;
+        const float screenX =
+            centreX + radius * point.x;
 
-        glColor4f(
-            colour.r,
-            colour.g,
-            colour.b,
-            colour.a);
+        const float screenY =
+            centreY - radius * point.y;
 
-        /*
-         * Four corners of one polar radar cell:
-         *
-         *     inner radius, lower angle
-         *     outer radius, lower angle
-         *     outer radius, upper angle
-         *     inner radius, upper angle
-         */
-        glVertex2f(
-            centreX +
-                radius *
-                innerRadius *
-                static_cast<float>(
-                    std::sin(angle0)),
-            centreY -
-                radius *
-                innerRadius *
-                static_cast<float>(
-                    std::cos(angle0)));
+        // Faint up/down blur in screen pixels.
+        const float smearPixels =
+            4.0f + 7.0f * adjusted;
 
-        glVertex2f(
-            centreX +
-                radius *
-                outerRadius *
-                static_cast<float>(
-                    std::sin(angle0)),
-            centreY -
-                radius *
-                outerRadius *
-                static_cast<float>(
-                    std::cos(angle0)));
+        const float sigmaPixels =
+            2.0f + 2.8f * adjusted;
 
-        glVertex2f(
-            centreX +
-                radius *
-                outerRadius *
-                static_cast<float>(
-                    std::sin(angle1)),
-            centreY -
-                radius *
-                outerRadius *
-                static_cast<float>(
-                    std::cos(angle1)));
+        constexpr int STEPS = 14;
 
-        glVertex2f(
-            centreX +
-                radius *
-                innerRadius *
-                static_cast<float>(
-                    std::sin(angle1)),
-            centreY -
-                radius *
-                innerRadius *
-                static_cast<float>(
-                    std::cos(angle1)));
+        for (int k = -STEPS; k <= STEPS; ++k) {
+
+            const float pixelOffset =
+                smearPixels *
+                static_cast<float>(k) /
+                static_cast<float>(STEPS);
+
+            const float gaussian =
+                std::exp(
+                    -0.5f *
+                    (pixelOffset * pixelOffset) /
+                    (sigmaPixels * sigmaPixels));
+
+            const float alpha =
+                colour.a *
+                gaussian *
+                (0.010f + 0.035f * adjusted);
+
+            glColor4f(
+                colour.r,
+                std::min(1.0f, colour.g + 0.05f),
+                colour.b,
+                alpha);
+
+            glVertex2f(
+                screenX,
+                screenY + pixelOffset);
+        }
     }
 
     glEnd();
+
+
+    // ========================================================
+    // ORIGINAL CLEAN CORE
+    // ========================================================
+
+    glPointSize(3.0f);
+    glBegin(GL_POINTS);
+
+    for (const PpiPoint& point : points) {
+
+        if (point.intensity <= 0.0f) {
+            continue;
+        }
+
+        const float r =
+            std::sqrt(
+                point.x * point.x +
+                point.y * point.y);
+
+        if (r <= 0.0f || r > 1.0f) {
+            continue;
+        }
+
+        const double theta =
+            std::atan2(
+                static_cast<double>(point.x),
+                static_cast<double>(point.y));
+
+        const float gainOffset =
+            (ui.gain - 0.50f) * 0.20f;
+
+        const float adjusted =
+            std::pow(
+                std::clamp(
+                    point.intensity + gainOffset,
+                    0.0f,
+                    1.0f),
+                1.10f);
+
+        const Colour colour =
+            radarColour(adjusted);
+
+        for (std::size_t i = 0; i < AZ_OFFSETS.size(); ++i) {
+
+            const double angle =
+                theta +
+                static_cast<double>(AZ_OFFSETS[i]) *
+                azimuthStep;
+
+            glColor4f(
+                colour.r,
+                colour.g,
+                colour.b,
+                colour.a * AZ_ALPHA[i]);
+
+            glVertex2f(
+                centreX +
+                    radius *
+                    r *
+                    static_cast<float>(std::sin(angle)),
+                centreY -
+                    radius *
+                    r *
+                    static_cast<float>(std::cos(angle)));
+        }
+    }
+
+    glEnd();
+
+    glPointSize(1.0f);
 }
 
 void drawPpiSweep(double azimuthRad, float centreX, float centreY, float radius)
@@ -1970,7 +2060,7 @@ void drawPpiWindow(
         centreAreaLeft + 12.0f,
         centreAreaBottom - 24.0f,
         1.2f,
-        "DISPLAY SEA TEXTURE IS VISUAL ONLY",
+        "",
         {0.38f, 0.58f, 0.44f, 0.75f});
 
     DrawRadarSelector(
@@ -2340,8 +2430,11 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // Higher-quality antialiasing for the PPI.
+    glfwWindowHint(GLFW_SAMPLES, 8);
+
     GLFWwindow* window =
-        glfwCreateWindow(1160, 820, "MAS10 Detailed Marine PPI", nullptr, nullptr);
+        glfwCreateWindow(1600, 1000, "MAS10 Detailed Marine PPI", nullptr, nullptr);
 
     if (!window) {
         glfwTerminate();
@@ -2350,6 +2443,10 @@ int main(int argc, char** argv)
     }
 
     glfwMakeContextCurrent(window);
+
+    // Smooth radar circles, spokes and target edges.
+    glEnable(GL_MULTISAMPLE);
+
     glfwSwapInterval(1);
 
     bool previousMouseDown = false;

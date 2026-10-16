@@ -13,8 +13,6 @@
 #include <gz/sim/components/Name.hh>
 #include <gz/sim/components/Collision.hh>
 #include <gz/sim/components/Geometry.hh>
-#include <gz/sim/components/Factory.hh>
-#include <gz/sim/components/SourceFilePath.hh>
 #include <gz/sim/components/Model.hh>
 #include <limits>
 #include <sdf/Element.hh>
@@ -194,6 +192,58 @@ std::uint64_t ReadSeedOrDefault(
     return static_cast<std::uint64_t>(value);
 }
 
+/*
+ * Extracts the asset folder name (e.g. "wamv") from the first visual mesh
+ * URI of a model, matching either ".../models/<name>/..." or
+ * "model://<name>/...". Returns an empty string if none is found.
+ */
+std::string ModelNameFromVisuals(const sdf::Model& model)
+{
+    for (std::uint64_t link_index = 0; link_index < model.LinkCount();
+         ++link_index) {
+        const sdf::Link* link = model.LinkByIndex(link_index);
+
+        if (!link) {
+            continue;
+        }
+
+        for (std::uint64_t visual_index = 0;
+             visual_index < link->VisualCount();
+             ++visual_index) {
+            const sdf::Visual* visual = link->VisualByIndex(visual_index);
+
+            if (!visual || !visual->Geom()) {
+                continue;
+            }
+
+            const sdf::Mesh* mesh = visual->Geom()->MeshShape();
+
+            if (!mesh) {
+                continue;
+            }
+
+            const std::string uri = mesh->Uri();
+
+            for (const std::string marker : {"/models/", "model://"}) {
+                const std::size_t marker_start = uri.find(marker);
+
+                if (marker_start == std::string::npos) {
+                    continue;
+                }
+
+                const std::size_t name_start = marker_start + marker.size();
+                const std::size_t name_end = uri.find('/', name_start);
+
+                if (name_end != std::string::npos) {
+                    return uri.substr(name_start, name_end - name_start);
+                }
+            }
+        }
+    }
+
+    return {};
+}
+
 }  // namespace
 
 namespace lotusim::sensor {
@@ -214,7 +264,6 @@ FmcwRadarSensor::FmcwRadarSensor(
           sensor_name)
     , m_node(node)
     , m_returns_topic(BuildRadarTopic(parent_name, sensor_name, "returns"))
-    , m_vessel_entity_id(vessel_entity)
     , m_sensor_entity_id(sensor_entity)
 {
 }
@@ -372,8 +421,7 @@ bool FmcwRadarSensor::CustomSensorLoad(const sdf::Sensor& sensor_sdf)
                 rclcpp::SensorDataQoS());
 
         m_logger->info(
-            "FmcwRadarSensor [{}]: publishing radar topics: "
-            "PPI=[{}], returns=[{}]",
+            "FmcwRadarSensor [{}]: publishing returns on [{}]",
             m_sensor_name,
             m_returns_topic);
 
@@ -391,6 +439,132 @@ bool FmcwRadarSensor::CustomSensorLoad(const sdf::Sensor& sensor_sdf)
 }
 
 
+const FmcwRadarSensor::CollisionGeometry&
+FmcwRadarSensor::CachedCollisionGeometry(
+    gz::sim::Entity collision_entity,
+    gz::sim::Entity owner_model,
+    const sdf::Geometry& geometry,
+    const gz::sim::EntityComponentManager& ecm)
+{
+    const auto cached = m_collision_cache.find(collision_entity);
+
+    if (cached != m_collision_cache.end()) {
+        return cached->second;
+    }
+
+    CollisionGeometry& entry = m_collision_cache[collision_entity];
+
+    entry.objectId = static_cast<std::int64_t>(owner_model);
+    entry.collisionId = static_cast<std::int64_t>(collision_entity);
+
+    if (const auto* name = ecm.Component<gz::sim::components::Name>(owner_model)) {
+        entry.objectName = name->Data();
+    }
+
+    if (const auto* model_sdf =
+            ecm.Component<gz::sim::components::ModelSdf>(owner_model)) {
+        entry.modelName = ModelNameFromVisuals(model_sdf->Data());
+    }
+
+    if (const auto* name =
+            ecm.Component<gz::sim::components::Name>(collision_entity)) {
+        entry.collisionName = name->Data();
+    }
+
+    if (const sdf::Mesh* mesh_sdf = geometry.MeshShape()) {
+        const gz::common::Mesh* mesh = gz::sim::loadMesh(*mesh_sdf);
+
+        if (!mesh) {
+            m_logger->warn(
+                "FmcwRadarSensor [{}]: unable to load mesh [{}]",
+                m_sensor_name,
+                mesh_sdf->Uri());
+
+            return entry;
+        }
+
+        const gz::math::Vector3d scale = mesh_sdf->Scale();
+
+        const auto scale_vertex = [&scale](const gz::math::Vector3d& vertex) {
+            return gz::math::Vector3d(
+                vertex.X() * scale.X(),
+                vertex.Y() * scale.Y(),
+                vertex.Z() * scale.Z());
+        };
+
+        for (unsigned int submesh_index = 0;
+             submesh_index < mesh->SubMeshCount();
+             ++submesh_index) {
+            const auto submesh = mesh->SubMeshByIndex(submesh_index).lock();
+
+            if (!submesh) {
+                continue;
+            }
+
+            if (submesh->SubMeshPrimitiveType() !=
+                gz::common::SubMesh::TRIANGLES) {
+                continue;
+            }
+
+            for (unsigned int index = 0;
+                 index + 2 < submesh->IndexCount();
+                 index += 3) {
+                const int index_a = submesh->Index(index);
+                const int index_b = submesh->Index(index + 1);
+                const int index_c = submesh->Index(index + 2);
+
+                if (index_a < 0 || index_b < 0 || index_c < 0) {
+                    continue;
+                }
+
+                for (const int vertex_index : {index_a, index_b, index_c}) {
+                    entry.localVertices.push_back(scale_vertex(
+                        submesh->Vertex(static_cast<unsigned int>(vertex_index))));
+                }
+            }
+        }
+
+        return entry;
+    }
+
+    if (const sdf::Box* box = geometry.BoxShape()) {
+        const gz::math::Vector3d half = box->Size() * 0.5;
+
+        const gz::math::Vector3d vertices[8] = {
+            {-half.X(), -half.Y(), -half.Z()},
+            {half.X(), -half.Y(), -half.Z()},
+            {half.X(), half.Y(), -half.Z()},
+            {-half.X(), half.Y(), -half.Z()},
+            {-half.X(), -half.Y(), half.Z()},
+            {half.X(), -half.Y(), half.Z()},
+            {half.X(), half.Y(), half.Z()},
+            {-half.X(), half.Y(), half.Z()}};
+
+        const int faces[12][3] = {
+            {0, 2, 1},
+            {0, 3, 2},
+            {4, 5, 6},
+            {4, 6, 7},
+            {0, 1, 5},
+            {0, 5, 4},
+            {1, 2, 6},
+            {1, 6, 5},
+            {2, 3, 7},
+            {2, 7, 6},
+            {3, 0, 4},
+            {3, 4, 7}};
+
+        for (const auto& face : faces) {
+            for (const int vertex_index : face) {
+                entry.localVertices.push_back(vertices[vertex_index]);
+            }
+        }
+    }
+
+    // Other geometry types are not supported and contribute no triangles.
+    return entry;
+}
+
 void FmcwRadarSensor::RebuildGeometryCache(
     const gz::sim::EntityComponentManager& ecm)
 {
@@ -398,12 +572,18 @@ void FmcwRadarSensor::RebuildGeometryCache(
     m_bvh_nodes.clear();
     m_bvh_root = -1;
 
+    // Forget collisions whose entity has been removed from the world.
+    for (auto it = m_collision_cache.begin(); it != m_collision_cache.end();) {
+        if (ecm.HasEntity(it->first)) {
+            ++it;
+        } else {
+            it = m_collision_cache.erase(it);
+        }
+    }
+
     const gz::math::Pose3d sensor_world_pose = gz::sim::worldPose(m_sensor_entity_id, ecm);
 
     std::size_t collision_count = 0;
-    std::size_t mesh_count = 0;
-    std::size_t box_count = 0;
-    std::size_t unsupported_count = 0;
 
     const auto to_radar_local = [&sensor_world_pose](
                                     const gz::math::Pose3d& collision_world_pose,
@@ -439,12 +619,7 @@ void FmcwRadarSensor::RebuildGeometryCache(
                                   const gz::math::Vector3d& a,
                                   const gz::math::Vector3d& b,
                                   const gz::math::Vector3d& c,
-                                  std::int64_t object_id,
-                                  const std::string& object_name,
-                                  std::int64_t model_id,
-                                  const std::string& model_name,
-                                  std::int64_t collision_id,
-                                  const std::string& collision_name) {
+                                  const CollisionGeometry& source) {
         gz::math::Vector3d normal = (b - a).Cross(c - a);
         const double normal_length = normal.Length();
 
@@ -468,14 +643,7 @@ void FmcwRadarSensor::RebuildGeometryCache(
             (a.Y() + b.Y() + c.Y()) / 3.0,
             (a.Z() + b.Z() + c.Z()) / 3.0};
 
-        triangle.objectId = object_id;
-        triangle.objectName = object_name;
-
-        triangle.modelId = model_id;
-        triangle.modelName = model_name;
-
-        triangle.collisionId = collision_id;
-        triangle.collisionName = collision_name;
+        triangle.source = &source;
 
         m_triangles.push_back(triangle);
     };
@@ -496,237 +664,39 @@ void FmcwRadarSensor::RebuildGeometryCache(
 
             ++collision_count;
 
-            const std::int64_t object_id = static_cast<std::int64_t>(owner_model);
-            const std::int64_t model_id = -1;
-            const std::int64_t collision_id = static_cast<std::int64_t>(collision_entity);
+            const CollisionGeometry& source = CachedCollisionGeometry(
+                collision_entity,
+                owner_model,
+                geometry_component->Data(),
+                ecm);
 
-            std::string object_name;
-            std::string model_name;
-            std::string collision_name;
-
-            if (const auto* name = ecm.Component<gz::sim::components::Name>(owner_model)) {
-                object_name = name->Data();
-            }
-
-            if (const auto* model_sdf = ecm.Component<gz::sim::components::ModelSdf>(owner_model)) {
-                const auto& model = model_sdf->Data();
-
-                for (std::uint64_t link_index = 0;
-                    link_index < model.LinkCount() && model_name.empty();
-                    ++link_index) {
-                    const sdf::Link* link = model.LinkByIndex(link_index);
-
-                    if (!link) {
-                        continue;
-                    }
-
-                    for (std::uint64_t visual_index = 0;
-                        visual_index < link->VisualCount() && model_name.empty();
-                        ++visual_index) {
-                        const sdf::Visual* visual = link->VisualByIndex(visual_index);
-
-                        if (!visual || !visual->Geom()) {
-                            continue;
-                        }
-
-                        const sdf::Mesh* mesh = visual->Geom()->MeshShape();
-
-                        if (!mesh) {
-                            continue;
-                        }
-
-                        const std::string uri = mesh->Uri();
-
-                        m_logger->info(
-                            "MODEL MESH | objectName={} uri=[{}]",
-                            object_name,
-                            uri);
-
-                        const std::string models_marker = "/models/";
-                        const std::size_t model_start = uri.find(models_marker);
-
-                        if (model_start != std::string::npos) {
-                            const std::size_t name_start = model_start + models_marker.size();
-                            const std::size_t name_end = uri.find('/', name_start);
-
-                            if (name_end != std::string::npos) {
-                                model_name = uri.substr(name_start, name_end - name_start);
-                            }
-                        }
-
-                        if (model_name.empty()) {
-                            const std::string model_uri_marker = "model://";
-                            const std::size_t uri_start = uri.find(model_uri_marker);
-
-                            if (uri_start != std::string::npos) {
-                                const std::size_t name_start = uri_start + model_uri_marker.size();
-                                const std::size_t name_end = uri.find('/', name_start);
-
-                                if (name_end != std::string::npos) {
-                                    model_name = uri.substr(name_start, name_end - name_start);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (const auto* name =
-                    ecm.Component<gz::sim::components::Name>(collision_entity)) {
-                collision_name = name->Data();
+            if (source.localVertices.empty()) {
+                return true;
             }
 
             const gz::math::Pose3d collision_world_pose =
                 gz::sim::worldPose(collision_entity, ecm);
 
-            const sdf::Geometry& geometry = geometry_component->Data();
+            const auto& vertices = source.localVertices;
 
-            if (const sdf::Mesh* mesh_sdf = geometry.MeshShape()) {
-                ++mesh_count;
-
-                const gz::common::Mesh* mesh = gz::sim::loadMesh(*mesh_sdf);
-
-                if (!mesh) {
-                    m_logger->warn(
-                        "FmcwRadarSensor [{}]: unable to load mesh [{}]",
-                        m_sensor_name,
-                        mesh_sdf->Uri());
-
-                    return true;
-                }
-
-                const gz::math::Vector3d scale = mesh_sdf->Scale();
-
-                for (unsigned int submesh_index = 0;
-                     submesh_index < mesh->SubMeshCount();
-                     ++submesh_index) {
-                    const auto submesh = mesh->SubMeshByIndex(submesh_index).lock();
-
-                    if (!submesh) {
-                        continue;
-                    }
-
-                    if (submesh->SubMeshPrimitiveType() !=
-                        gz::common::SubMesh::TRIANGLES) {
-                        continue;
-                    }
-
-                    for (unsigned int index = 0;
-                         index + 2 < submesh->IndexCount();
-                         index += 3) {
-                        const int index_a = submesh->Index(index);
-                        const int index_b = submesh->Index(index + 1);
-                        const int index_c = submesh->Index(index + 2);
-
-                        if (index_a < 0 || index_b < 0 || index_c < 0) {
-                            continue;
-                        }
-
-                        const auto scale_vertex = [&scale](
-                                                      const gz::math::Vector3d& vertex) {
-                            return gz::math::Vector3d(
-                                vertex.X() * scale.X(),
-                                vertex.Y() * scale.Y(),
-                                vertex.Z() * scale.Z());
-                        };
-
-                        const gz::math::Vector3d local_a =
-                            scale_vertex(submesh->Vertex(
-                                static_cast<unsigned int>(index_a)));
-
-                        const gz::math::Vector3d local_b =
-                            scale_vertex(submesh->Vertex(
-                                static_cast<unsigned int>(index_b)));
-
-                        const gz::math::Vector3d local_c =
-                            scale_vertex(submesh->Vertex(
-                                static_cast<unsigned int>(index_c)));
-
-                        add_triangle(
-                            to_radar_local(collision_world_pose, local_a),
-                            to_radar_local(collision_world_pose, local_b),
-                            to_radar_local(collision_world_pose, local_c),
-                            object_id,
-                            object_name,
-                            model_id,
-                            model_name,
-                            collision_id,
-                            collision_name);
-                    }
-                }
-
-                return true;
+            for (std::size_t i = 0; i + 2 < vertices.size(); i += 3) {
+                add_triangle(
+                    to_radar_local(collision_world_pose, vertices[i]),
+                    to_radar_local(collision_world_pose, vertices[i + 1]),
+                    to_radar_local(collision_world_pose, vertices[i + 2]),
+                    source);
             }
 
-            if (const sdf::Box* box = geometry.BoxShape()) {
-                ++box_count;
-
-                const gz::math::Vector3d half = box->Size() * 0.5;
-
-                const gz::math::Vector3d local_vertices[8] = {
-                    {-half.X(), -half.Y(), -half.Z()},
-                    {half.X(), -half.Y(), -half.Z()},
-                    {half.X(), half.Y(), -half.Z()},
-                    {-half.X(), half.Y(), -half.Z()},
-                    {-half.X(), -half.Y(), half.Z()},
-                    {half.X(), -half.Y(), half.Z()},
-                    {half.X(), half.Y(), half.Z()},
-                    {-half.X(), half.Y(), half.Z()}};
-
-                gz::math::Vector3d vertices[8];
-
-                for (std::size_t i = 0; i < 8; ++i) {
-                    vertices[i] = to_radar_local(
-                        collision_world_pose,
-                        local_vertices[i]);
-                }
-
-                const int faces[12][3] = {
-                    {0, 2, 1},
-                    {0, 3, 2},
-                    {4, 5, 6},
-                    {4, 6, 7},
-                    {0, 1, 5},
-                    {0, 5, 4},
-                    {1, 2, 6},
-                    {1, 6, 5},
-                    {2, 3, 7},
-                    {2, 7, 6},
-                    {3, 0, 4},
-                    {3, 4, 7}};
-
-                for (const auto& face : faces) {
-                    add_triangle(
-                        vertices[face[0]],
-                        vertices[face[1]],
-                        vertices[face[2]],
-                        object_id,
-                        object_name,
-                        model_id,
-                        model_name,
-                        collision_id,
-                        collision_name);
-                }
-
-                return true;
-            }
-
-            ++unsupported_count;
             return true;
         });
 
     m_collision_count = collision_count;
-
-    (void)mesh_count;
-    (void)box_count;
-    (void)unsupported_count;
 
     if (!m_triangles.empty()) {
         m_bvh_nodes.reserve(m_triangles.size() * 2);
         m_bvh_root = BuildBvhNode(0, m_triangles.size());
     }
 }
-
 
 int FmcwRadarSensor::BuildBvhNode(std::size_t start, std::size_t count)
 {
@@ -1005,40 +975,20 @@ bool FmcwRadarSensor::TraceOne(
     hit.position = {hit_position.X(), hit_position.Y(), hit_position.Z()};
 
     hit.normal = {hit_normal.X(), hit_normal.Y(), hit_normal.Z()};
-        
-    hit.objectId = nearest_triangle->objectId;
-    hit.objectName = nearest_triangle->objectName;
 
-    hit.modelId = nearest_triangle->modelId;
-    hit.modelName = nearest_triangle->modelName;
+    const CollisionGeometry& source = *nearest_triangle->source;
 
-    hit.collisionId = nearest_triangle->collisionId;
-    hit.collisionName = nearest_triangle->collisionName;
+    hit.objectId = source.objectId;
+    hit.objectName = source.objectName;
 
-    hit.materialId = nearest_triangle->materialId;
-    hit.materialName = nearest_triangle->materialName;
+    hit.modelId = source.modelId;
+    hit.modelName = source.modelName;
 
+    hit.collisionId = source.collisionId;
+    hit.collisionName = source.collisionName;
 
-    static std::atomic<int> debug_hit_count{0};
-
-    const int hit_number = debug_hit_count.fetch_add(1);
-
-    if (hit_number < 20) {
-        m_logger->info(
-            "RAY HIT | "
-            "objectId={} objectName={} | "
-            "modelId={} modelName={} | "
-            "collisionId={} collisionName={} | "
-            "materialId={} materialName={}",
-            hit.objectId,
-            hit.objectName,
-            hit.modelId,
-            hit.modelName,
-            hit.collisionId,
-            hit.collisionName,
-            hit.materialId,
-            hit.materialName);
-    }
+    hit.materialId = source.materialId;
+    hit.materialName = source.materialName;
 
     return true;
 }
@@ -1193,11 +1143,6 @@ bool FmcwRadarSensor::UpdateSensor(
         return false;
     }
 
-    const auto& config = m_radar_model->config();
-
-    const std::size_t ray_count =
-        config.azimuthCount * config.horizontalSamples * config.verticalSamples;
-
     RebuildGeometryCache(ecm);
 
     if (m_triangles.empty()) {
@@ -1230,7 +1175,7 @@ bool FmcwRadarSensor::UpdateSensor(
 
     ++m_scan_number;
 
-    m_logger->info(
+    m_logger->debug(
         "FmcwRadarSensor [{}]: scan {} | "
         "collision_objects={} | radar_ray_hits={}",
         m_sensor_name,

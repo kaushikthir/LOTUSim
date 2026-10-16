@@ -71,11 +71,6 @@ install(
 )
 
 install(
-    TARGETS 
-    RUNTIME DESTINATION lib/${PROJECT_NAME}
-)
-
-install(
     TARGETS fmcw_radar_marine_ppi
     RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
